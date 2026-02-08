@@ -44,6 +44,7 @@ export type ConstraintConfig = {
   setupLatencyMin: number;
   nextNapCapMinIfLateNap: number;
   feedIntervalMaxMin: number;
+  expectedNapDurationMin: number;
 };
 
 export type OutputModel = {
@@ -51,6 +52,11 @@ export type OutputModel = {
   nextWindow: string | null;
   nextHardStop: string | null;
   isAsleep: boolean;
+  nextWindowStartUtc: number | null;
+  nextWindowEndUtc: number | null;
+  nextHardStopUtc: number | null;
+  wakeWindowRemainingMin: number | null;
+  expectedWakeUtc: number | null;
   activityCategories: {
     allowed: { label: string; expiresAt: number | null }[];
     suppressed: { label: string; reason: string }[];

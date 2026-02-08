@@ -21,6 +21,8 @@ export const defaultConfig: ConstraintConfig = {
   nextNapCapMinIfLateNap: 40,
   // Long feed gaps can destabilize regulation, so we track max intervals.
   feedIntervalMaxMin: 180,
+  // Used to estimate expected wake when asleep.
+  expectedNapDurationMin: 60,
 };
 
 const minutesFromMs = (ms: number) => Math.round(ms / MS_MIN);
@@ -91,24 +93,13 @@ export const computeOutputs = (
   const activitySuppressed: { label: string; reason: string }[] = [];
   const shifts: { delta: string; status: "applied" | "pending" }[] = [];
 
-  if (state.lastWakeTime) {
-    const awakeMin = minutesFromMs(now - state.lastWakeTime);
-    summary.push(`Awake for ${awakeMin} min`);
-  } else {
-    summary.push("Awaiting first awake marker");
-  }
-
-  if (state.lastFeedTime) {
-    const feedMin = minutesFromMs(now - state.lastFeedTime);
-    summary.push(`Last feed ${feedMin} min ago`);
-  } else {
-    summary.push("No feed logged yet");
-  }
-
-  summary.push(`Regulation level: ${state.regulationLevel}`);
-
   let nextWindow: string | null = null;
   let nextHardStop: string | null = null;
+  let nextWindowStartUtc: number | null = null;
+  let nextWindowEndUtc: number | null = null;
+  let nextHardStopUtc: number | null = null;
+  let wakeWindowRemainingMin: number | null = null;
+  let expectedWakeUtc: number | null = null;
   let wakeUtilization: number | null = null;
   let sleepPressureTrend: "up" | "down" = "up";
   let regulationRisk: "low" | "rising" | "high" = "rising";
@@ -129,6 +120,8 @@ export const computeOutputs = (
 
     const startWindow = addMinutes(state.lastWakeTime, minWake);
     const endWindow = addMinutes(state.lastWakeTime, maxWake);
+    nextWindowStartUtc = startWindow;
+    nextWindowEndUtc = endWindow;
 
     nextWindow = `${formatTime(startWindow, timeZone)} – ${formatTime(endWindow, timeZone)}`;
 
@@ -146,6 +139,7 @@ export const computeOutputs = (
       bedtimeLatest,
       -(config.routineLatencyMin + config.setupLatencyMin)
     );
+    nextHardStopUtc = routineLatest;
     nextHardStop = `Routine latest ${formatTime(routineLatest, timeZone)} (bedtime cap ${formatTime(
       bedtimeLatest,
       timeZone
@@ -153,6 +147,7 @@ export const computeOutputs = (
 
     const awakeMin = minutesFromMs(now - state.lastWakeTime);
     wakeUtilization = Math.min(1, Math.max(0, awakeMin / maxWake));
+    wakeWindowRemainingMin = Math.max(0, Math.round(maxWake - awakeMin));
     sleepPressureTrend = currentlyAsleep ? "down" : "up";
 
     regulationRisk =
@@ -169,6 +164,10 @@ export const computeOutputs = (
       activitySuppressed.splice(0, activitySuppressed.length);
       nextWindow = null;
       nextHardStop = null;
+      nextWindowStartUtc = null;
+      nextWindowEndUtc = null;
+      nextHardStopUtc = null;
+      wakeWindowRemainingMin = null;
     } else if (awakeMin < minWake * 0.6) {
       windowAllowed.push("Regulation / low stimulation", "Outdoor light", "Routine reset");
       windowSuppressed.push("High stimulation", "New novel activities");
@@ -266,11 +265,56 @@ export const computeOutputs = (
     });
   }
 
+  if (currentlyAsleep && state.lastNapStart) {
+    const lateNap =
+      state.lastNapEnd !== null &&
+      getZonedParts(state.lastNapEnd, timeZone).hour >= config.lateNapHour;
+    const estimatedDuration = lateNap
+      ? Math.min(config.expectedNapDurationMin, config.nextNapCapMinIfLateNap)
+      : config.expectedNapDurationMin;
+    expectedWakeUtc = addMinutes(state.lastNapStart, estimatedDuration);
+  }
+
+  if (currentlyAsleep && state.lastNapStart) {
+    const asleepMin = minutesFromMs(now - state.lastNapStart);
+    summary.push(`Asleep for ${asleepMin} min`);
+    if (expectedWakeUtc) {
+      summary.push(`Expected wake ${formatTime(expectedWakeUtc, timeZone)}`);
+    } else {
+      summary.push("Expected wake —");
+    }
+  } else if (state.lastWakeTime) {
+    const awakeMin = minutesFromMs(now - state.lastWakeTime);
+    summary.push(`Awake for ${awakeMin} min`);
+    if (state.lastNapDuration) {
+      summary.push(`Last slept ${minutesFromMs(state.lastNapDuration)} min`);
+    } else {
+      summary.push("Last slept —");
+    }
+  } else {
+    summary.push("Awaiting first awake marker");
+    summary.push("Last slept —");
+  }
+
+  if (state.lastFeedTime) {
+    const feedMin = minutesFromMs(now - state.lastFeedTime);
+    summary.push(`Last feed ${feedMin} min ago`);
+  } else {
+    summary.push("No feed logged yet");
+  }
+
+  summary.push(`Regulation level: ${state.regulationLevel}`);
+
   return {
     stateSummary: summary,
     nextWindow,
     nextHardStop,
     isAsleep: currentlyAsleep,
+    nextWindowStartUtc,
+    nextWindowEndUtc,
+    nextHardStopUtc,
+    wakeWindowRemainingMin,
+    expectedWakeUtc,
     activityCategories: {
       allowed: activityAllowed,
       suppressed: activitySuppressed,
