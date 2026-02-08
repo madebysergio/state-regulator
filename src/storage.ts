@@ -25,12 +25,26 @@ export const loadState = (nowUtcMs: number): AppState => {
     if (!raw) return initialAppState;
     const parsed = JSON.parse(raw) as { eventLog?: CareEvent[] };
     const eventLog = (parsed.eventLog ?? []).map((event) => {
-      if ("timestampUtc" in event) {
-        return { ...event, timestampUtc: String(event.timestampUtc) };
+      if (event && typeof event === "object") {
+        const record = event as Record<string, unknown>;
+        if ("timestampUtc" in record) {
+          return {
+            ...(record as CareEvent),
+            timestampUtc: String(record.timestampUtc),
+          };
+        }
+        const legacyMs =
+          typeof record.timestamp === "number" ? (record.timestamp as number) : nowUtcMs;
+        return {
+          ...(record as CareEvent),
+          timestampUtc: new Date(legacyMs).toISOString(),
+        };
       }
-      const legacy = event as CareEvent & { timestamp?: number };
-      const legacyMs = typeof legacy.timestamp === "number" ? legacy.timestamp : Date.now();
-      return { ...event, timestampUtc: new Date(legacyMs).toISOString() };
+      return {
+        id: `legacy-${nowUtcMs}-${Math.random().toString(16).slice(2)}`,
+        type: "FirstAwake",
+        timestampUtc: new Date(nowUtcMs).toISOString(),
+      } as CareEvent;
     });
     return rebuildFromLog(eventLog, nowUtcMs);
   } catch {
