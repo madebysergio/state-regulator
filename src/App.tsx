@@ -13,6 +13,7 @@ import {
   Moon,
   Sparkles,
   Timer,
+  X,
 } from "lucide-react";
 import { computeOutputs, defaultConfig } from "./constraints";
 import { applyEvent, buildEvent, initialAppState, rebuildFromLog } from "./state";
@@ -31,6 +32,7 @@ const EVENT_TYPES: { type: EventType; label: string; hint: string }[] = [
 
 const MS_MIN = 60 * 1000;
 const CUSTOM_SOFT_STOPS_KEY = "reactive-care-scheduler:soft-stops";
+const EASE_CURVE = "ease-[cubic-bezier(0.22,0.61,0.36,1)]";
 
 type SoftStopAnchor = "wake" | "solids" | "routine";
 type CustomSoftStop = {
@@ -87,6 +89,14 @@ const formatTimeZoned = (utcMs: number, timeZone: string) =>
     timeZone,
     hour: "2-digit",
     minute: "2-digit",
+  }).format(new Date(utcMs));
+
+const formatDateZoned = (utcMs: number, timeZone: string) =>
+  new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    month: "short",
+    day: "numeric",
+    year: "numeric",
   }).format(new Date(utcMs));
 
 const getZonedParts = (utcMs: number, timeZone: string) => {
@@ -170,7 +180,7 @@ const StatusIcon = ({ variant }: { variant: "allowed" | "suppressed" }) => (
 );
 
 const getStateIcon = (item: string) => {
-  if (item.startsWith("Snoozing") || item.startsWith("Asleep")) {
+  if (item.startsWith("Sleeping") || item.startsWith("Asleep")) {
     return <Moon className="h-5 w-5 text-accent dark:text-gh-accent" />;
   }
   if (item.startsWith("Expected wake") || item.startsWith("Last slept")) {
@@ -179,7 +189,7 @@ const getStateIcon = (item: string) => {
   if (item.startsWith("Last feed") || item.startsWith("No feed")) {
     return <Activity className="h-5 w-5 text-accent dark:text-gh-accent" />;
   }
-  if (item.startsWith("Regulation level")) {
+  if (item.startsWith("How baby's doing")) {
     return <Gauge className="h-5 w-5 text-accent dark:text-gh-accent" />;
   }
   return <Timer className="h-5 w-5 text-accent dark:text-gh-accent" />;
@@ -199,7 +209,7 @@ export default function App() {
   const [editId, setEditId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState<string>("");
   const [shiftExpanded, setShiftExpanded] = useState<boolean>(true);
-  const [eventLogExpanded, setEventLogExpanded] = useState<boolean>(false);
+  const [eventLogModalOpen, setEventLogModalOpen] = useState<boolean>(false);
   const [eventLogSort, setEventLogSort] = useState<"latest" | "oldest">("latest");
   const [selectedUpcomingId, setSelectedUpcomingId] = useState<string | null>(null);
   const [predictionsUpdatedAt, setPredictionsUpdatedAt] = useState<string | null>(null);
@@ -214,6 +224,8 @@ export default function App() {
   const [softStopLabel, setSoftStopLabel] = useState("Play time");
   const [softStopAnchor, setSoftStopAnchor] = useState<SoftStopAnchor>("wake");
   const [softStopOffset, setSoftStopOffset] = useState(20);
+  const [toasts, setToasts] = useState<{ id: string; message: string }[]>([]);
+  const [softStopModalOpen, setSoftStopModalOpen] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -228,6 +240,14 @@ export default function App() {
   useEffect(() => {
     saveCustomSoftStops(customSoftStops);
   }, [customSoftStops]);
+
+  const pushToast = (message: string) => {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    setToasts((prev) => [...prev, { id, message }]);
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((toast) => toast.id !== id));
+    }, 2600);
+  };
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowUtcMs(Date.now()), 10 * 1000);
@@ -394,7 +414,7 @@ export default function App() {
           id: "routine-latest",
           label: "Routine latest",
           timeUtc: outputs.nextHardStopUtc,
-          prep: "Wind down, reduce stimulation",
+          prep: "Wind-down, reduce stimulation",
         }
       : null,
     feedWindowStartUtc && feedWindowEndUtc
@@ -453,6 +473,21 @@ export default function App() {
       ? Date.parse(b.timestampUtc) - Date.parse(a.timestampUtc)
       : Date.parse(a.timestampUtc) - Date.parse(b.timestampUtc)
   );
+  const groupedEventLog = useMemo(() => {
+    const groups: { date: string; events: typeof sortedEventLog }[] = [];
+    const map = new Map<string, typeof sortedEventLog>();
+    sortedEventLog.forEach((event) => {
+      const dateKey = formatDateZoned(Date.parse(event.timestampUtc), timeZone);
+      if (!map.has(dateKey)) {
+        map.set(dateKey, []);
+      }
+      map.get(dateKey)?.push(event);
+    });
+    map.forEach((events, date) => {
+      groups.push({ date, events });
+    });
+    return groups;
+  }, [sortedEventLog, timeZone]);
   const lastRoutineStartUtc =
     [...state.eventLog]
       .filter((event) => event.type === "RoutineStarted")
@@ -496,14 +531,14 @@ export default function App() {
   );
 
   const currentStatus = outputs.isAsleep
-    ? "Snoozing"
+    ? "Sleeping"
     : napInProgress
     ? "Napping"
     : state.lastFeedTime && nowUtcMs - state.lastFeedTime < 30 * MS_MIN
-    ? "Bottle Feeding"
+    ? "Feeding"
     : state.lastWakeTime && nowUtcMs - state.lastWakeTime < 30 * MS_MIN
-    ? "Active Routine"
-    : "Playing";
+    ? "Getting ready"
+    : "Playtime";
 
   useEffect(() => {
     if (selectedUpcomingId && !timelineItems.find((item) => item.id === selectedUpcomingId)) {
@@ -521,6 +556,7 @@ export default function App() {
   const addEvent = () => {
     const event = buildEvent(selectedEvent, nowUtcMs);
     setState((prev) => applyEvent(prev, event, nowUtcMs));
+    pushToast(`Logged ${EVENT_TYPES.find((item) => item.type === selectedEvent)?.label}`);
   };
 
   const startEdit = (eventId: string) => {
@@ -547,9 +583,13 @@ export default function App() {
       );
     });
     setEditId(null);
+    pushToast("Log updated");
   };
 
-  const clearAll = () => setState(initialAppState);
+  const clearAll = () => {
+    setState(initialAppState);
+    pushToast("Start over");
+  };
 
   const deleteEvent = (eventId: string) => {
     setState((prev) => {
@@ -574,14 +614,24 @@ export default function App() {
     setSoftStopAnchor("wake");
     setSoftStopOffset(20);
     setSoftStopFormOpen(false);
+    pushToast("Reminder added");
+  };
+
+  const removeCustomSoftStop = (id: string) => {
+    setCustomSoftStops((prev) => prev.filter((stop) => stop.id !== id));
+    pushToast("Reminder removed");
   };
 
   return (
     <div className="min-h-screen bg-app px-6 pb-16 pt-8 text-ink dark:bg-app-dark dark:text-gh-text md:px-12 md:pt-10 lg:px-16 lg:pt-12">
       <header className="flex items-center justify-end">
         <button
-          className="inline-flex items-center gap-2 rounded-full border border-panel-strong bg-white px-4 py-2 text-sm font-semibold text-ink shadow-sm dark:border-gh-border dark:bg-gh-surface dark:text-gh-text"
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          className={`inline-flex items-center gap-2 rounded-full border border-panel-strong bg-white px-4 py-2 text-sm font-semibold text-ink shadow-sm transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:bg-gh-surface dark:text-gh-text`}
+          onClick={() => {
+            const next = theme === "dark" ? "light" : "dark";
+            setTheme(next);
+            pushToast(next === "dark" ? "Dark mode enabled" : "Light mode enabled");
+          }}
           type="button"
         >
           {theme === "dark" ? "Light mode" : "Dark mode"}
@@ -599,7 +649,7 @@ export default function App() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 font-display text-2xl">
             <ClipboardList className="h-6 w-6 text-accent dark:text-gh-accent" />
-            Event log
+            Today's log
           </h2>
           <div className="flex items-center gap-2">
             <span className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
@@ -617,154 +667,170 @@ export default function App() {
             </select>
           </div>
         </div>
-        {eventCount === 0 ? (
-          <div className="mt-3 text-sm text-muted dark:text-gh-muted">No events logged yet.</div>
-        ) : (
-          <div className="mt-4 flex flex-col gap-3">
-            {(eventLogExpanded ? sortedEventLog : sortedEventLog.slice(0, 2)).map((event) => (
-              <div
-                key={event.id}
-                className="flex min-h-[64px] flex-wrap items-center justify-between gap-4 rounded-xl bg-white p-4 dark:bg-gh-surface-2"
-              >
-                <div className="flex items-center gap-3">
-                  {EVENT_ICONS[event.type]}
-                  <div className="flex flex-col gap-1">
-                    <strong className="text-base">{EVENT_LABELS[event.type]}</strong>
-                    <span className="text-xl font-semibold">
-                      {formatTimeZoned(Date.parse(event.timestampUtc), timeZone)}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {editId === event.id ? (
-                    <>
-                      <div className="flex items-center gap-2 rounded-full border border-panel-strong bg-white px-4 py-3 shadow-[0_0_0_1px_rgba(0,0,0,0.02)] dark:border-gh-border dark:bg-gh-surface">
-                        <input
-                          type="datetime-local"
-                          className="bg-transparent text-sm outline-none"
-                          value={editValue}
-                          onChange={(eventTarget) => setEditValue(eventTarget.target.value)}
-                        />
-                        <span className="flex h-7 w-7 items-center justify-center rounded-full border border-panel-strong text-muted">
-                          <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
-                            <path
-                              d="M7 3v2M17 3v2M4 8h16M5 6h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.5"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          </svg>
-                        </span>
-                      </div>
-                      <button
-                        className="rounded-full bg-accent px-6 py-3 text-base font-semibold text-white"
-                        onClick={commitEdit}
-                        type="button"
-                      >
-                        Save
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      className="rounded-full border border-panel-strong px-6 py-3 text-base dark:border-gh-border"
-                      onClick={() => startEdit(event.id)}
-                      type="button"
-                    >
-                      Edit time
-                    </button>
-                  )}
+        <div className="mt-4">
+          <h3 className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+            Log activity
+          </h3>
+          <div className="mt-3 relative">
+            <div className="h-[190px] snap-y snap-mandatory overflow-y-auto pr-2">
+              {orderedEvents.map((event) => {
+                const highlightRoutine =
+                  event.type === "RoutineStarted" &&
+                  outputs.pressureIndicator.regulationRisk === "rising" &&
+                  (outputs.pressureIndicator.wakeUtilization ?? 0) >= 0.85 &&
+                  outputs.windowCategories.allowed.includes("Routine reset");
+                const isNext = nextExpectedEvent === event.type;
+                return (
                   <button
-                    className="flex h-11 w-11 items-center justify-center rounded-full border border-panel-strong text-muted dark:border-gh-border dark:text-gh-muted"
-                    onClick={() => deleteEvent(event.id)}
+                    key={event.type}
+                    className={`w-full min-h-[76px] snap-start rounded-2xl border px-5 py-4 text-left text-base transition-all duration-300 ${EASE_CURVE} ${
+                      selectedEvent === event.type
+                        ? "border-accent bg-accent-soft dark:bg-gh-surface-2"
+                        : "border-transparent bg-white dark:bg-gh-surface-2"
+                    } ${highlightRoutine || isNext ? "ring-2 ring-accent/30 border-accent" : ""}`}
+                    onClick={() => setSelectedEvent(event.type)}
                     type="button"
-                    aria-label="Delete log"
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        {EVENT_ICONS[event.type]}
+                        <div>
+                          <span className="block text-lg font-medium">{event.label}</span>
+                          <small className="text-sm text-muted dark:text-gh-muted">
+                            {event.hint}
+                          </small>
+                        </div>
+                      </div>
+                      {isNext ? (
+                        <span className="rounded-full border border-accent px-3 py-1 text-xs uppercase tracking-[0.1em] text-accent">
+                          Up next
+                        </span>
+                      ) : null}
+                    </div>
                   </button>
-                </div>
-              </div>
-            ))}
+                );
+              })}
+            </div>
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-b from-transparent to-panel dark:to-gh-surface" />
           </div>
-        )}
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              className={`rounded-full border border-accent px-6 py-3 text-base font-semibold text-accent transition-all duration-300 ${EASE_CURVE}`}
+              onClick={addEvent}
+              type="button"
+            >
+              Log {EVENT_TYPES.find((event) => event.type === selectedEvent)?.label}
+            </button>
+            <button
+              className={`rounded-full border border-panel-strong px-6 py-3 text-base transition-all duration-300 ${EASE_CURVE} dark:border-gh-border`}
+              onClick={clearAll}
+              type="button"
+            >
+            Start over
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <h3 className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+            Today's log
+          </h3>
+          {eventCount === 0 ? (
+            <div className="mt-3 text-sm text-muted dark:text-gh-muted">No events logged yet.</div>
+          ) : (
+            <div className="mt-3 flex flex-col gap-4">
+              {groupedEventLog.map((group) => (
+                <div key={group.date} className="flex flex-col gap-3">
+                  <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                    {group.date}
+                  </div>
+                  {group.events.slice(0, 2).map((event) => (
+                    <div
+                      key={event.id}
+                      className="flex min-h-[64px] flex-wrap items-center justify-between gap-4 rounded-xl bg-white p-4 fade-in dark:bg-gh-surface-2"
+                    >
+                      <div className="flex items-center gap-3">
+                        {EVENT_ICONS[event.type]}
+                        <div className="flex flex-col gap-1">
+                          <strong className="text-base">{EVENT_LABELS[event.type]}</strong>
+                          <span className="text-xl font-semibold">
+                            {formatTimeZoned(Date.parse(event.timestampUtc), timeZone)}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {editId === event.id ? (
+                          <>
+                            <div className="flex items-center gap-2 rounded-full border border-panel-strong bg-white px-4 py-3 shadow-[0_0_0_1px_rgba(0,0,0,0.02)] dark:border-gh-border dark:bg-gh-surface">
+                              <input
+                                type="datetime-local"
+                                className="bg-transparent text-sm outline-none"
+                                value={editValue}
+                                onChange={(eventTarget) => setEditValue(eventTarget.target.value)}
+                              />
+                              <span className="flex h-7 w-7 items-center justify-center rounded-full border border-panel-strong text-muted">
+                                <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+                                  <path
+                                    d="M7 3v2M17 3v2M4 8h16M5 6h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.5"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                </svg>
+                              </span>
+                            </div>
+                            <button
+                              className={`rounded-full bg-accent px-6 py-3 text-base font-semibold text-white transition-all duration-300 ${EASE_CURVE}`}
+                              onClick={commitEdit}
+                              type="button"
+                            >
+                              Save
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            className={`rounded-full border border-panel-strong px-6 py-3 text-base transition-all duration-300 ${EASE_CURVE} dark:border-gh-border`}
+                            onClick={() => startEdit(event.id)}
+                            type="button"
+                          >
+                            Edit time
+                          </button>
+                        )}
+                        <button
+                          className={`flex h-11 w-11 items-center justify-center rounded-full border border-panel-strong text-muted transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:text-gh-muted`}
+                          onClick={() => deleteEvent(event.id)}
+                          type="button"
+                          aria-label="Delete log"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         {eventCount > 2 ? (
           <button
             className="mt-4 inline-flex items-center gap-2 rounded-full border border-panel-strong px-4 py-2 text-sm dark:border-gh-border"
-            onClick={() => setEventLogExpanded(!eventLogExpanded)}
+            onClick={() => setEventLogModalOpen(true)}
             type="button"
           >
-            {eventLogExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            {eventLogExpanded ? "Hide" : "Show all"}
+            <ChevronDown className="h-4 w-4" />
+            See full log
           </button>
         ) : null}
-      </section>
-
-      <section className="mt-6 rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
-        <h2 className="flex items-center gap-2 font-display text-2xl">
-          <Activity className="h-6 w-6 text-accent dark:text-gh-accent" />
-          Care updates
-        </h2>
-        <div className="mt-4 h-[110px] snap-y snap-mandatory overflow-y-auto pr-2">
-          {orderedEvents.map((event) => {
-            const highlightRoutine =
-              event.type === "RoutineStarted" &&
-              outputs.pressureIndicator.regulationRisk === "rising" &&
-              (outputs.pressureIndicator.wakeUtilization ?? 0) >= 0.85 &&
-              outputs.windowCategories.allowed.includes("Routine reset");
-            const isNext = nextExpectedEvent === event.type;
-            return (
-              <button
-                key={event.type}
-                className={`w-full min-h-[76px] snap-start rounded-2xl border px-5 py-4 text-left text-base transition ${
-                  selectedEvent === event.type
-                    ? "border-accent bg-accent-soft dark:bg-gh-surface-2"
-                    : "border-transparent bg-white dark:bg-gh-surface-2"
-                } ${highlightRoutine || isNext ? "ring-2 ring-accent/30 border-accent" : ""}`}
-                onClick={() => setSelectedEvent(event.type)}
-                type="button"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    {EVENT_ICONS[event.type]}
-                    <div>
-                      <span className="block text-lg font-medium">{event.label}</span>
-                      <small className="text-sm text-muted dark:text-gh-muted">{event.hint}</small>
-                    </div>
-                  </div>
-                  {isNext ? (
-                    <span className="rounded-full border border-accent px-3 py-1 text-xs uppercase tracking-[0.1em] text-accent">
-                      Up next
-                    </span>
-                  ) : null}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-        <div className="mt-4 flex flex-wrap gap-3">
-          <button
-            className="rounded-full border border-accent px-6 py-3 text-base font-semibold text-accent"
-            onClick={addEvent}
-            type="button"
-          >
-            Log {EVENT_TYPES.find((event) => event.type === selectedEvent)?.label}
-          </button>
-          <button
-            className="rounded-full border border-panel-strong px-6 py-3 text-base dark:border-gh-border"
-            onClick={clearAll}
-            type="button"
-          >
-            Reset day
-          </button>
-        </div>
       </section>
 
       <section className="mt-6 rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 font-display text-2xl">
             <Timer className="h-6 w-6 text-accent dark:text-gh-accent" />
-            Upcoming events
+            What's coming up
           </h2>
           {predictionsUpdatedAt ? (
             <span className="rounded-full border border-panel-strong px-3 py-1 text-xs uppercase tracking-[0.08em] text-muted dark:border-gh-border dark:text-gh-muted">
@@ -799,14 +865,14 @@ export default function App() {
                     ? "border-warning/40 text-warning"
                     : "border-allowed/40 text-allowed";
                 return (
-                  <button
-                    key={item.id}
-                    className={`min-h-[100px] min-w-[180px] rounded-2xl border bg-white p-4 text-left transition dark:bg-gh-surface ${urgency} ${
-                      selectedUpcomingId === item.id ? "ring-2 ring-accent/30" : ""
-                    }`}
-                    onClick={() =>
-                      setSelectedUpcomingId(selectedUpcomingId === item.id ? null : item.id)
-                    }
+                <button
+                  key={item.id}
+                  className={`min-h-[100px] min-w-[180px] rounded-2xl border bg-white p-4 text-left transition-all duration-300 ${EASE_CURVE} dark:bg-gh-surface ${urgency} ${
+                    selectedUpcomingId === item.id ? "ring-2 ring-accent/30" : ""
+                  }`}
+                  onClick={() =>
+                    setSelectedUpcomingId(selectedUpcomingId === item.id ? null : item.id)
+                  }
                     type="button"
                   >
                     <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
@@ -837,16 +903,16 @@ export default function App() {
       <section className="mt-6 rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
         <h2 className="flex items-center gap-2 font-display text-2xl">
           <AlarmClock className="h-6 w-6 text-accent dark:text-gh-accent" />
-          Next windows
+          Next steps
         </h2>
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
           <div className="rounded-2xl bg-white p-5 dark:bg-gh-surface-2">
             <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-              Next allowed window
+              Next chance
             </div>
             <div className="mt-3 flex flex-wrap items-baseline gap-3">
               {outputs.isAsleep ? (
-                <span className="text-4xl font-semibold text-ink dark:text-gh-text">Snoozing</span>
+                <span className="text-4xl font-semibold text-ink dark:text-gh-text">Sleeping</span>
               ) : nextWindowCountdown !== null ? (
                 <span className="text-4xl font-semibold text-ink dark:text-gh-text">
                   {nextWindowCountdown === 0 ? currentStatus : formatCountdown(nextWindowCountdown)}
@@ -872,7 +938,7 @@ export default function App() {
           {!outputs.isAsleep ? (
             <div className="mt-4 border-t border-panel-strong pt-3 dark:border-gh-border">
               <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-                Allowed now
+                OK now
               </div>
               <ul className="mt-2 grid gap-2">
                 {outputs.windowCategories.allowed.map((item) => (
@@ -883,7 +949,7 @@ export default function App() {
                 ))}
               </ul>
               <div className="mt-3 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-                Suppressed now
+                Skip for now
               </div>
               <ul className="mt-2 grid gap-2">
                 {outputs.windowCategories.suppressed.map((item) => (
@@ -909,7 +975,7 @@ export default function App() {
         </div>
         <div className="rounded-2xl bg-white p-5 dark:bg-gh-surface-2">
           <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-            Next soft stops
+            Flexible reminders
           </div>
           {outputs.isAsleep || allSoftStops.length === 0 ? (
             <div className="mt-2 text-sm text-muted dark:text-gh-muted">—</div>
@@ -939,7 +1005,7 @@ export default function App() {
             </ul>
           )}
           <div className="mt-4 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-            Next hard stop
+            Don't miss
           </div>
           {outputs.isAsleep ? (
             <div className="mt-2 text-sm text-muted dark:text-gh-muted">—</div>
@@ -963,7 +1029,7 @@ export default function App() {
               </div>
               {outputs.nextHardStopUtc ? (
                 <div className="mt-3 text-sm text-ink dark:text-gh-text">
-                  After solids → Wind down for bottle → Nap (estimated{" "}
+                  After solids → Wind-down for bottle → Nap (estimated{" "}
                   {formatTimeZoned(outputs.nextHardStopUtc, timeZone)})
                 </div>
               ) : null}
@@ -971,25 +1037,33 @@ export default function App() {
           )}
           <div className="mt-4 flex flex-col items-start gap-3">
             <div className="flex flex-wrap items-center gap-2">
-              <button
-                className="rounded-full border border-panel-strong px-5 py-2.5 text-sm font-semibold dark:border-gh-border"
-                type="button"
-                onClick={() => setSoftStopFormOpen((prev) => !prev)}
-              >
-                {softStopFormOpen ? "Close soft stop" : "Add soft stop"}
-              </button>
-              {softStopFormOpen ? (
+              {!softStopFormOpen ? (
                 <button
-                  className="rounded-full border border-panel-strong px-5 py-2.5 text-sm font-semibold dark:border-gh-border"
+                  className={`rounded-full border border-panel-strong px-5 py-2.5 text-sm font-semibold transition-all duration-300 ${EASE_CURVE} dark:border-gh-border`}
+                  type="button"
+                  onClick={() => setSoftStopFormOpen(true)}
+                >
+                  Add reminder
+                </button>
+              ) : (
+                <button
+                  className={`rounded-full border border-panel-strong px-5 py-2.5 text-sm font-semibold transition-all duration-300 ${EASE_CURVE} dark:border-gh-border`}
                   type="button"
                   onClick={() => setSoftStopFormOpen(false)}
                 >
                   Cancel
                 </button>
-              ) : null}
+              )}
+              <button
+                className={`rounded-full border border-panel-strong px-5 py-2.5 text-sm font-semibold transition-all duration-300 ${EASE_CURVE} dark:border-gh-border`}
+                type="button"
+                onClick={() => setSoftStopModalOpen(true)}
+              >
+                Edit reminders
+              </button>
             </div>
             {softStopFormOpen ? (
-              <div className="w-full max-w-xl rounded-2xl border border-panel-strong bg-white p-4 dark:border-gh-border dark:bg-gh-surface-2">
+              <div className="w-full max-w-xl rounded-2xl border border-panel-strong bg-white p-4 fade-in dark:border-gh-border dark:bg-gh-surface-2">
                 <div className="grid gap-3 md:grid-cols-3">
                   <label className="flex flex-col gap-1 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
                     Label
@@ -1028,11 +1102,11 @@ export default function App() {
                 </div>
                 <div className="mt-3 flex items-center gap-2">
                   <button
-                    className="rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-white"
+                    className={`rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-white transition-all duration-300 ${EASE_CURVE}`}
                     type="button"
                     onClick={addCustomSoftStop}
                   >
-                    Save soft stop
+                    Save
                   </button>
                 </div>
               </div>
@@ -1043,7 +1117,7 @@ export default function App() {
         <div className="mt-4 flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted dark:text-gh-muted">
           <div className="h-px flex-1 bg-panel-strong dark:bg-gh-border" />
           <ChevronDown className="h-4 w-4" />
-          <span>Event log</span>
+          <span>Today's log</span>
           <div className="h-px flex-1 bg-panel-strong dark:bg-gh-border" />
         </div>
       </section>
@@ -1052,7 +1126,7 @@ export default function App() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 font-display text-2xl">
             <Gauge className="h-6 w-6 text-accent dark:text-gh-accent" />
-            Wake window status
+            Time until tired
           </h2>
           <button
             className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted"
@@ -1095,7 +1169,7 @@ export default function App() {
           </div>
           <div className="mt-2 text-sm text-muted dark:text-gh-muted">
             {outputs.isAsleep
-              ? "Snoozing"
+              ? "Sleeping"
               : outputs.pressureIndicator.regulationRisk === "high"
               ? "Approaching overtired window"
               : outputs.pressureIndicator.regulationRisk === "rising"
@@ -1111,7 +1185,7 @@ export default function App() {
               </div>
               {wakePct !== null ? (
                 <div
-                  className="absolute top-1/2 h-8 w-8 -translate-y-1/2 rounded-full border-2 border-white bg-ink dark:border-gh-surface dark:bg-gh-text"
+                  className={`absolute top-1/2 h-8 w-8 -translate-y-1/2 rounded-full border-2 border-white bg-ink transition-all duration-500 ${EASE_CURVE} dark:border-gh-surface dark:bg-gh-text`}
                   style={{ left: `calc(${wakePct}% - 16px)` }}
                 />
               ) : null}
@@ -1123,7 +1197,7 @@ export default function App() {
       <section className="mt-6 rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
         <h2 className="flex items-center gap-2 font-display text-2xl">
           <Activity className="h-6 w-6 text-accent dark:text-gh-accent" />
-          Current system state
+          Right now
         </h2>
         <ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {outputs.stateSummary.map((item, index) => (
@@ -1144,7 +1218,7 @@ export default function App() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 font-display text-2xl">
             <Layers3 className="h-6 w-6 text-accent dark:text-gh-accent" />
-            Shift preview
+            Today's pattern
           </h2>
           <button
             className="inline-flex items-center gap-2 rounded-full border border-panel-strong px-4 py-2 text-sm dark:border-gh-border"
@@ -1162,7 +1236,7 @@ export default function App() {
           </span>
         </div>
         {shiftExpanded ? (
-          <ul className="mt-4 flex flex-col gap-3">
+          <ul className="mt-4 flex flex-col gap-3 fade-in">
             {historyDelta ? (
               <li className="flex items-center gap-3 rounded-xl border border-accent/40 bg-accent-soft px-4 py-3 text-sm font-semibold text-ink dark:border-gh-accent/50 dark:bg-gh-surface-2 dark:text-gh-text">
                 <span className="text-xs text-accent">●</span>
@@ -1200,6 +1274,156 @@ export default function App() {
       <footer className="mt-6 text-sm text-muted dark:text-gh-muted">
         <p>State-driven regulator</p>
       </footer>
+
+      {toasts.length > 0 ? (
+        <div className="fixed bottom-6 right-6 z-50 flex w-[280px] flex-col gap-2">
+          {toasts.map((toast) => (
+            <div
+              key={toast.id}
+              className={`rounded-2xl border border-panel-strong bg-white px-4 py-3 text-sm font-semibold text-ink shadow-panel transition-all duration-300 ${EASE_CURVE} toast-anim dark:border-gh-border dark:bg-gh-surface dark:text-gh-text dark:shadow-panel-dark`}
+            >
+              {toast.message}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {eventLogModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-6">
+          <button
+            className="absolute inset-0 bg-black/40"
+            type="button"
+            aria-label="Close event log"
+            onClick={() => setEventLogModalOpen(false)}
+          />
+          <div className="relative w-full max-w-3xl rounded-2xl border border-panel-strong bg-white p-6 shadow-panel dark:border-gh-border dark:bg-gh-surface dark:shadow-panel-dark">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-xl font-semibold text-ink dark:text-gh-text">Full log</h3>
+            <div className="flex items-center gap-2">
+              <span className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                Sort
+              </span>
+              <select
+                className="rounded-full border border-panel-strong bg-white px-3 py-2 text-sm dark:border-gh-border dark:bg-gh-surface"
+                value={eventLogSort}
+                onChange={(eventTarget) =>
+                  setEventLogSort(eventTarget.target.value as "latest" | "oldest")
+                }
+              >
+                <option value="latest">Latest</option>
+                <option value="oldest">Oldest</option>
+              </select>
+            </div>
+            <button
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-panel-strong text-muted dark:border-gh-border dark:text-gh-muted"
+              type="button"
+              aria-label="Close"
+              onClick={() => setEventLogModalOpen(false)}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mt-4 max-h-[70vh] overflow-y-auto pr-2">
+              <div className="flex flex-col gap-4">
+                {groupedEventLog.map((group) => (
+                  <div key={group.date} className="flex flex-col gap-3">
+                    <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                      {group.date}
+                    </div>
+                    {group.events.map((event) => (
+                      <div
+                        key={event.id}
+                        className="flex min-h-[64px] flex-wrap items-center justify-between gap-4 rounded-xl bg-white p-4 dark:bg-gh-surface-2"
+                      >
+                        <div className="flex items-center gap-3">
+                          {EVENT_ICONS[event.type]}
+                          <div className="flex flex-col gap-1">
+                            <strong className="text-base">{EVENT_LABELS[event.type]}</strong>
+                            <span className="text-xl font-semibold">
+                              {formatTimeZoned(Date.parse(event.timestampUtc), timeZone)}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            className={`rounded-full border border-panel-strong px-6 py-3 text-base transition-all duration-300 ${EASE_CURVE} dark:border-gh-border`}
+                            onClick={() => startEdit(event.id)}
+                            type="button"
+                          >
+                            Edit time
+                          </button>
+                          <button
+                            className={`flex h-11 w-11 items-center justify-center rounded-full border border-panel-strong text-muted transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:text-gh-muted`}
+                            onClick={() => deleteEvent(event.id)}
+                            type="button"
+                            aria-label="Delete log"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {softStopModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-6">
+          <button
+            className="absolute inset-0 bg-black/40"
+            type="button"
+            aria-label="Close soft stop manager"
+            onClick={() => setSoftStopModalOpen(false)}
+          />
+          <div className="relative w-full max-w-2xl rounded-2xl border border-panel-strong bg-white p-6 shadow-panel dark:border-gh-border dark:bg-gh-surface dark:shadow-panel-dark">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-xl font-semibold text-ink dark:text-gh-text">Reminders</h3>
+              <button
+                className="flex h-10 w-10 items-center justify-center rounded-full border border-panel-strong text-muted dark:border-gh-border dark:text-gh-muted"
+                type="button"
+                aria-label="Close"
+                onClick={() => setSoftStopModalOpen(false)}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {customSoftStops.length === 0 ? (
+              <div className="mt-4 text-sm text-muted dark:text-gh-muted">No reminders yet.</div>
+            ) : (
+              <div className="mt-4 flex max-h-[60vh] flex-col gap-3 overflow-y-auto pr-2">
+                {customSoftStops.map((stop) => (
+                  <div
+                    key={stop.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-panel-strong px-4 py-3 text-sm dark:border-gh-border"
+                  >
+                    <div className="text-ink dark:text-gh-text">
+                      {stop.label} ·{" "}
+                      {stop.anchor === "wake"
+                        ? "After wake"
+                        : stop.anchor === "solids"
+                        ? "After solids"
+                        : "After routine"}{" "}
+                      + {stop.offsetMin} min
+                    </div>
+                    <button
+                      className={`flex h-10 w-10 items-center justify-center rounded-full border border-panel-strong text-muted transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:text-gh-muted`}
+                      type="button"
+                      onClick={() => removeCustomSoftStop(stop.id)}
+                      aria-label="Remove soft stop"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
