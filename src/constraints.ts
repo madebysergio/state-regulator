@@ -293,7 +293,7 @@ export const computeOutputs = (
   if (currentlyAsleep) {
     const asleepStartUtc = isNightSleep ? lastAsleepUtc : state.lastNapStart;
     const asleepMin = asleepStartUtc ? minutesFromMs(now - asleepStartUtc) : 0;
-    summary.push(`Snoozing for ${asleepMin} min`);
+    summary.push(`Asleep for ${asleepMin} min`);
     if (!isNightSleep) {
       if (expectedWakeUtc) {
         summary.push(`Expected wake ${formatTime(expectedWakeUtc, timeZone)}`);
@@ -321,7 +321,7 @@ export const computeOutputs = (
     summary.push("No feed logged yet");
   }
 
-  summary.push(`Regulation level: ${state.regulationLevel}`);
+  summary.push(`How baby's doing: ${state.regulationLevel}`);
 
   return {
     stateSummary: summary,
