@@ -767,166 +767,168 @@ export default function App() {
             </div>
           </div>
         </div>
-        <div className="mt-4">
-          <h3 className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-            Log activity
-          </h3>
-          <div className="mt-3 relative">
-            <div className="h-[190px] snap-y snap-mandatory overflow-y-auto pr-2 space-y-3">
-              {orderedEvents.map((event) => {
-                const highlightRoutine =
-                  event.type === "RoutineStarted" &&
-                  outputs.pressureIndicator.regulationRisk === "rising" &&
-                  (outputs.pressureIndicator.wakeUtilization ?? 0) >= 0.85 &&
-                  outputs.windowCategories.allowed.includes("Routine reset");
-                const isNext = nextExpectedEvent === event.type;
-                return (
-                  <button
-                    key={event.type}
-                    className={`w-full min-h-[76px] snap-start rounded-2xl border px-5 py-4 text-left text-base transition-all duration-300 ${EASE_CURVE} ${
-                      selectedEvent === event.type
-                        ? "border-accent bg-accent-soft dark:bg-gh-surface-2"
-                        : "border-transparent bg-white dark:bg-gh-surface-2"
-                    } ${highlightRoutine || isNext ? "ring-2 ring-accent/30 border-accent" : ""}`}
-                    onClick={() => setSelectedEvent(event.type)}
-                    type="button"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        {EVENT_ICONS[event.type]}
-                        <div>
-                          <span className="block text-lg font-medium">{event.label}</span>
-                          <small className="text-sm text-muted dark:text-gh-muted">
-                            {event.hint}
-                          </small>
-                        </div>
-                      </div>
-                      {isNext ? (
-                        <span className="rounded-full border border-accent px-3 py-1 text-xs uppercase tracking-[0.1em] text-accent">
-                          Up next
-                        </span>
-                      ) : null}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-b from-transparent to-panel dark:to-gh-surface" />
-          </div>
-          <div className="mt-4 flex w-full flex-col gap-3">
-            <button
-              className={`w-full rounded-full bg-accent px-6 py-3 text-base font-semibold text-white transition-all duration-300 ${EASE_CURVE}`}
-              onClick={addEvent}
-              type="button"
-            >
-              Log {EVENT_TYPES.find((event) => event.type === selectedEvent)?.label}
-            </button>
-            <button
-              className={`w-full rounded-full border border-panel-strong bg-white px-6 py-3 text-base transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:bg-gh-surface`}
-              onClick={clearAll}
-              type="button"
-            >
-              Start over
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-6">
-          <h3 className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-            Today's log
-          </h3>
-          {eventCount === 0 ? (
-            <div className="mt-3 text-sm text-muted dark:text-gh-muted">No events logged yet.</div>
-          ) : (
-            <div className="mt-3 flex flex-col gap-4">
-              {groupedEventLog.map((group) => (
-                <div key={group.date} className="flex flex-col gap-3">
-                  <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-                    {group.date}
-                  </div>
-                  {group.events.slice(0, 2).map((event) => (
-                    <div
-                      key={event.id}
-                      className="flex min-h-[64px] flex-wrap items-center justify-between gap-4 rounded-xl bg-white p-4 fade-in dark:bg-gh-surface-2"
+        <div className="mt-4 grid gap-6 xl:grid-cols-2">
+          <div>
+            <h3 className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+              Log activity
+            </h3>
+            <div className="mt-3 relative">
+              <div className="h-[190px] snap-y snap-mandatory overflow-y-auto pr-2 space-y-3">
+                {orderedEvents.map((event) => {
+                  const highlightRoutine =
+                    event.type === "RoutineStarted" &&
+                    outputs.pressureIndicator.regulationRisk === "rising" &&
+                    (outputs.pressureIndicator.wakeUtilization ?? 0) >= 0.85 &&
+                    outputs.windowCategories.allowed.includes("Routine reset");
+                  const isNext = nextExpectedEvent === event.type;
+                  return (
+                    <button
+                      key={event.type}
+                      className={`w-full min-h-[76px] snap-start rounded-2xl border px-5 py-4 text-left text-base transition-all duration-300 ${EASE_CURVE} ${
+                        selectedEvent === event.type
+                          ? "border-accent bg-accent-soft dark:bg-gh-surface-2"
+                          : "border-transparent bg-white dark:bg-gh-surface-2"
+                      } ${highlightRoutine || isNext ? "ring-2 ring-accent/30 border-accent" : ""}`}
+                      onClick={() => setSelectedEvent(event.type)}
+                      type="button"
                     >
-                      <div className="flex items-center gap-3">
-                        {EVENT_ICONS[event.type]}
-                        <div className="flex flex-col gap-1">
-                          <strong className="text-base">{EVENT_LABELS[event.type]}</strong>
-                          <span className="text-xl font-semibold">
-                            {formatTimeZoned(Date.parse(event.timestampUtc), timeZone)}
-                          </span>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          {EVENT_ICONS[event.type]}
+                          <div>
+                            <span className="block text-lg font-medium">{event.label}</span>
+                            <small className="text-sm text-muted dark:text-gh-muted">
+                              {event.hint}
+                            </small>
+                          </div>
                         </div>
+                        {isNext ? (
+                          <span className="rounded-full border border-accent px-3 py-1 text-xs uppercase tracking-[0.1em] text-accent">
+                            Up next
+                          </span>
+                        ) : null}
                       </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        {editId === event.id ? (
-                          <>
-                            <div className="flex items-center gap-2 rounded-full border border-panel-strong bg-white px-4 py-3 shadow-[0_0_0_1px_rgba(0,0,0,0.02)] dark:border-gh-border dark:bg-gh-surface">
-                              <input
-                                type="datetime-local"
-                                className="bg-transparent text-sm outline-none"
-                                value={editValue}
-                                onChange={(eventTarget) => setEditValue(eventTarget.target.value)}
-                              />
-                              <span className="flex h-7 w-7 items-center justify-center rounded-full border border-panel-strong text-muted">
-                                <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
-                                  <path
-                                    d="M7 3v2M17 3v2M4 8h16M5 6h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="1.5"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  />
-                                </svg>
-                              </span>
-                            </div>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-b from-transparent to-panel dark:to-gh-surface" />
+            </div>
+            <div className="mt-4 flex w-full flex-col gap-3">
+              <button
+                className={`w-full rounded-full bg-accent px-6 py-3 text-base font-semibold text-white transition-all duration-300 ${EASE_CURVE}`}
+                onClick={addEvent}
+                type="button"
+              >
+                Log {EVENT_TYPES.find((event) => event.type === selectedEvent)?.label}
+              </button>
+              <button
+                className={`w-full rounded-full border border-panel-strong bg-white px-6 py-3 text-base transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:bg-gh-surface`}
+                onClick={clearAll}
+                type="button"
+              >
+                Start over
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+              Today's log
+            </h3>
+            {eventCount === 0 ? (
+              <div className="mt-3 text-sm text-muted dark:text-gh-muted">No events logged yet.</div>
+            ) : (
+              <div className="mt-3 flex flex-col gap-4">
+                {groupedEventLog.map((group) => (
+                  <div key={group.date} className="flex flex-col gap-3">
+                    <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                      {group.date}
+                    </div>
+                    {group.events.slice(0, 2).map((event) => (
+                      <div
+                        key={event.id}
+                        className="flex min-h-[64px] flex-wrap items-center justify-between gap-4 rounded-xl bg-white p-4 fade-in dark:bg-gh-surface-2"
+                      >
+                        <div className="flex items-center gap-3">
+                          {EVENT_ICONS[event.type]}
+                          <div className="flex flex-col gap-1">
+                            <strong className="text-base">{EVENT_LABELS[event.type]}</strong>
+                            <span className="text-xl font-semibold">
+                              {formatTimeZoned(Date.parse(event.timestampUtc), timeZone)}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {editId === event.id ? (
+                            <>
+                              <div className="flex items-center gap-2 rounded-full border border-panel-strong bg-white px-4 py-3 shadow-[0_0_0_1px_rgba(0,0,0,0.02)] dark:border-gh-border dark:bg-gh-surface">
+                                <input
+                                  type="datetime-local"
+                                  className="bg-transparent text-sm outline-none"
+                                  value={editValue}
+                                  onChange={(eventTarget) => setEditValue(eventTarget.target.value)}
+                                />
+                                <span className="flex h-7 w-7 items-center justify-center rounded-full border border-panel-strong text-muted">
+                                  <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+                                    <path
+                                      d="M7 3v2M17 3v2M4 8h16M5 6h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="1.5"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                  </svg>
+                                </span>
+                              </div>
+                              <button
+                                className={`rounded-full bg-accent px-6 py-3 text-base font-semibold text-white transition-all duration-300 ${EASE_CURVE}`}
+                                onClick={commitEdit}
+                                type="button"
+                              >
+                                Save
+                              </button>
+                            </>
+                          ) : (
                             <button
-                              className={`rounded-full bg-accent px-6 py-3 text-base font-semibold text-white transition-all duration-300 ${EASE_CURVE}`}
-                              onClick={commitEdit}
+                              className={`rounded-full border border-panel-strong px-6 py-3 text-base transition-all duration-300 ${EASE_CURVE} dark:border-gh-border`}
+                              onClick={() => startEdit(event.id)}
                               type="button"
                             >
-                              Save
+                              Edit time
                             </button>
-                          </>
-                        ) : (
+                          )}
                           <button
-                            className={`rounded-full border border-panel-strong px-6 py-3 text-base transition-all duration-300 ${EASE_CURVE} dark:border-gh-border`}
-                            onClick={() => startEdit(event.id)}
+                            className={`flex h-11 w-11 items-center justify-center rounded-full border border-panel-strong text-muted transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:text-gh-muted`}
+                            onClick={() => deleteEvent(event.id)}
                             type="button"
+                            aria-label="Delete log"
                           >
-                            Edit time
+                            <Trash2 className="h-4 w-4" />
                           </button>
-                        )}
-                        <button
-                          className={`flex h-11 w-11 items-center justify-center rounded-full border border-panel-strong text-muted transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:text-gh-muted`}
-                          onClick={() => deleteEvent(event.id)}
-                          type="button"
-                          aria-label="Delete log"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          )}
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+            {eventCount > 2 ? (
+              <button
+                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-full border border-panel-strong px-4 py-3 text-sm dark:border-gh-border"
+                onClick={() => setEventLogModalOpen(true)}
+                type="button"
+              >
+                <ChevronDown className="h-4 w-4" />
+                See full log
+              </button>
+            ) : null}
+          </div>
         </div>
-        {eventCount > 2 ? (
-          <button
-            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-full border border-panel-strong px-4 py-3 text-sm dark:border-gh-border"
-            onClick={() => setEventLogModalOpen(true)}
-            type="button"
-          >
-            <ChevronDown className="h-4 w-4" />
-            See full log
-          </button>
-        ) : null}
       </section>
 
-      <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
+      <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 xl:col-span-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 font-display text-2xl">
             <Clock className="h-6 w-6 text-accent dark:text-gh-accent" />
@@ -1038,6 +1040,26 @@ export default function App() {
             ) : null}
           </div>
         ) : null}
+      </section>
+
+      <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
+        <h2 className="flex items-center gap-2 font-display text-2xl">
+          <Activity className="h-6 w-6 text-accent dark:text-gh-accent" />
+          Right now
+        </h2>
+        <ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {outputs.stateSummary.map((item, index) => (
+            <li
+              key={`${item}-${index}`}
+              className="rounded-xl bg-white p-5 text-base font-medium dark:bg-gh-surface-2"
+            >
+              <div className="flex items-center gap-3">
+                {getStateIcon(item)}
+                <span>{item}</span>
+              </div>
+            </li>
+          ))}
+        </ul>
       </section>
 
       </div>
@@ -1342,26 +1364,6 @@ export default function App() {
             </div>
           </div>
         </div>
-      </section>
-
-      <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 xl:col-span-2">
-        <h2 className="flex items-center gap-2 font-display text-2xl">
-          <Activity className="h-6 w-6 text-accent dark:text-gh-accent" />
-          Right now
-        </h2>
-        <ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {outputs.stateSummary.map((item, index) => (
-            <li
-              key={`${item}-${index}`}
-              className="rounded-xl bg-white p-5 text-base font-medium dark:bg-gh-surface-2"
-            >
-              <div className="flex items-center gap-3">
-                {getStateIcon(item)}
-                <span>{item}</span>
-              </div>
-            </li>
-          ))}
-        </ul>
       </section>
 
       <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 xl:col-span-2">
