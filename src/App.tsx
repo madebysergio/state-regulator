@@ -934,7 +934,9 @@ export default function App() {
             </div>
             <div className="mt-3 flex flex-wrap items-baseline gap-3">
               {outputs.isAsleep ? (
-                <span className="text-4xl font-semibold text-ink dark:text-gh-text">Sleeping</span>
+                <span className="text-4xl font-semibold text-ink dark:text-gh-text">
+                  Morning wake
+                </span>
               ) : nextWindowCountdown !== null ? (
                 <span className="text-4xl font-semibold text-ink dark:text-gh-text">
                   {nextWindowCountdown === 0 ? currentStatus : formatCountdown(nextWindowCountdown)}
