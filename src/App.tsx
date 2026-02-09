@@ -236,6 +236,8 @@ export default function App() {
   const [toasts, setToasts] = useState<{ id: string; message: string }[]>([]);
   const [softStopModalOpen, setSoftStopModalOpen] = useState(false);
   const [wakeInfoOpen, setWakeInfoOpen] = useState(false);
+  const [isXL, setIsXL] = useState(false);
+  const [upcomingRowsToShow, setUpcomingRowsToShow] = useState(1);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -262,6 +264,15 @@ export default function App() {
   useEffect(() => {
     const timer = window.setInterval(() => setNowUtcMs(Date.now()), 10 * 1000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia("(min-width: 1280px)");
+    const update = () => setIsXL(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
   }, []);
 
   useEffect(() => {
@@ -452,16 +463,82 @@ export default function App() {
     rangeEndUtc?: number | null;
     prep: string;
   }[];
+  const dayParts = getZonedParts(nowUtcMs, timeZone);
+  const dayEndUtc = getUtcMsFromZoned(
+    { year: dayParts.year, month: dayParts.month, day: dayParts.day, hour: 23, minute: 59 },
+    timeZone
+  );
+  const bedtimeLatestUtc = getUtcMsFromZoned(
+    {
+      year: dayParts.year,
+      month: dayParts.month,
+      day: dayParts.day,
+      hour: defaultConfig.bedtimeLatestHour,
+      minute: defaultConfig.bedtimeLatestMinute,
+    },
+    timeZone
+  );
+  const buildDayUpcoming = () => {
+    const items: {
+      id: string;
+      label: string;
+      timeUtc: number;
+      rangeEndUtc?: number | null;
+      prep: string;
+    }[] = [];
+    const startWake =
+      outputs.expectedWakeUtc && outputs.expectedWakeUtc > nowUtcMs
+        ? outputs.expectedWakeUtc
+        : nowUtcMs;
+    let wakeStart = startWake;
+    let cycle = 0;
+    while (wakeStart < dayEndUtc && cycle < 6) {
+      const feedStart = wakeStart + defaultConfig.feedIntervalMinMin * MS_MIN;
+      const feedEnd = wakeStart + defaultConfig.feedIntervalMaxMin * MS_MIN;
+      if (feedStart <= dayEndUtc) {
+        items.push({
+          id: `feed-${cycle}`,
+          label: cycle === 0 && outputs.isAsleep ? "Morning feed" : "Feed window",
+          timeUtc: feedStart,
+          rangeEndUtc: feedEnd,
+          prep: "Prep feeding supplies",
+        });
+      }
+      const napStart = wakeStart + defaultConfig.minWakeWindowMin * MS_MIN;
+      const napEnd = wakeStart + defaultConfig.maxWakeWindowMin * MS_MIN;
+      if (napStart <= dayEndUtc) {
+        items.push({
+          id: `nap-${cycle}`,
+          label: "Nap window",
+          timeUtc: napStart,
+          rangeEndUtc: napEnd,
+          prep: "Prepare sleep space",
+        });
+      }
+      const nextWake = napStart + defaultConfig.expectedNapDurationMin * MS_MIN;
+      wakeStart = nextWake;
+      cycle += 1;
+    }
+    if (bedtimeLatestUtc > nowUtcMs && bedtimeLatestUtc <= dayEndUtc) {
+      items.push({
+        id: "bedtime-latest",
+        label: "Routine latest",
+        timeUtc: bedtimeLatestUtc,
+        prep: "Wind-down, reduce stimulation",
+      });
+    }
+    return items;
+  };
+  const dayUpcoming = buildDayUpcoming();
 
-  const timelineItems = upcomingCandidates
+  const timelineItems = [...upcomingCandidates, ...dayUpcoming]
     .filter((item) => {
       const windowEnd = item.rangeEndUtc ?? item.timeUtc;
       const baseline = Math.max(nowUtcMs, lastEventUtc);
-      const horizonEnd = outputs.isAsleep
-        ? outputs.expectedWakeUtc
-          ? outputs.expectedWakeUtc + 2 * 60 * MS_MIN
-          : nowUtcMs + 4 * 60 * MS_MIN
-        : outputs.nextHardStopUtc ?? nowUtcMs + 4 * 60 * MS_MIN;
+      const horizonEnd =
+        outputs.nextHardStopUtc && outputs.nextHardStopUtc > nowUtcMs
+          ? outputs.nextHardStopUtc
+          : dayEndUtc;
       const inWindow = baseline <= windowEnd;
       if (!inWindow) return false;
       if (item.rangeEndUtc) {
@@ -555,6 +632,15 @@ export default function App() {
       setSelectedUpcomingId(null);
     }
   }, [selectedUpcomingId, timelineItems]);
+
+  useEffect(() => {
+    setUpcomingRowsToShow(1);
+  }, [nextThreeTimeline.length]);
+
+  const rowsPerView = isXL ? 3 : 1;
+  const maxUpcomingRows = Math.max(1, Math.ceil(nextThreeTimeline.length / rowsPerView));
+  const visibleUpcoming = nextThreeTimeline.slice(0, upcomingRowsToShow * rowsPerView);
+  const canShowMoreUpcoming = upcomingRowsToShow < maxUpcomingRows;
 
   useEffect(() => {
     if (!editId) return;
@@ -655,7 +741,8 @@ export default function App() {
         </strong>
       </section>
 
-      <section className="mt-4 rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
+      <div className="mt-6 flex flex-col gap-6">
+      <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 flex flex-col">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 font-display text-2xl">
             <ClipboardList className="h-6 w-6 text-accent dark:text-gh-accent" />
@@ -685,7 +772,7 @@ export default function App() {
             Log activity
           </h3>
           <div className="mt-3 relative">
-            <div className="h-[190px] snap-y snap-mandatory overflow-y-auto pr-2">
+            <div className="h-[190px] snap-y snap-mandatory overflow-y-auto pr-2 space-y-3">
               {orderedEvents.map((event) => {
                 const highlightRoutine =
                   event.type === "RoutineStarted" &&
@@ -839,7 +926,7 @@ export default function App() {
         ) : null}
       </section>
 
-      <section className="mt-6 rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
+      <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 font-display text-2xl">
             <Clock className="h-6 w-6 text-accent dark:text-gh-accent" />
@@ -854,7 +941,7 @@ export default function App() {
         <div className="mt-2 text-sm text-muted dark:text-gh-muted">
           Updates after each log.
         </div>
-        <div className="mt-4 rounded-2xl bg-white p-5 dark:bg-gh-surface-2">
+        <div className="mt-4 flex h-full max-h-full flex-col rounded-2xl bg-white p-5 dark:bg-gh-surface-2">
           {nextThreeTimeline.length === 0 ? (
             <div className="flex h-full items-center gap-3 text-sm text-muted dark:text-gh-muted">
               <div className="h-10 w-40 animate-pulse rounded-full bg-panel-strong dark:bg-gh-border" />
@@ -865,8 +952,8 @@ export default function App() {
               <div className="text-xs uppercase tracking-[0.2em] text-muted dark:text-gh-muted">
                 Now
               </div>
-              <div className="mt-3 flex flex-col gap-4">
-                {nextThreeTimeline.map((item) => {
+              <div className="mt-3 grid grid-cols-1 gap-4 overflow-hidden pr-2 transition-all duration-300 xl:grid-cols-3">
+                {visibleUpcoming.map((item) => {
                   const minutes = Math.max(
                     0,
                     Math.ceil((item.effectiveTimeUtc - nowUtcMs) / MS_MIN)
@@ -887,7 +974,7 @@ export default function App() {
                   return (
                     <button
                       key={item.id}
-                      className={`w-full rounded-2xl border border-allowed/40 bg-white p-5 text-left transition-all duration-300 ${EASE_CURVE} dark:border-allowed/30 dark:bg-gh-surface-2 ${
+                      className={`w-full rounded-2xl border border-allowed/40 bg-white p-5 text-left transition-all duration-300 ${EASE_CURVE} fade-in dark:border-allowed/30 dark:bg-gh-surface-2 ${
                         selectedUpcomingId === item.id ? "ring-2 ring-accent/30" : ""
                       }`}
                       onClick={() =>
@@ -895,20 +982,27 @@ export default function App() {
                       }
                       type="button"
                     >
-                      <div className="flex items-center justify-between text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-                        <span>{showStatus ? currentStatus : `in ${formatCountdown(minutes)}`}</span>
-                        {upcomingIcon}
-                      </div>
-                      <div className="mt-3 text-2xl font-semibold text-ink dark:text-gh-text">
-                        {item.label}
-                      </div>
-                      <div className="mt-2 text-lg font-semibold text-accent dark:text-gh-accent">
-                        {item.rangeEndUtc
-                          ? `${formatTimeZoned(item.timeUtc, timeZone)} – ${formatTimeZoned(
-                              item.rangeEndUtc,
-                              timeZone
-                            )}`
-                          : formatTimeZoned(item.timeUtc, timeZone)}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          {upcomingIcon}
+                          <div>
+                            <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                              {showStatus ? currentStatus : `in ${formatCountdown(minutes)}`}
+                            </div>
+                            <div className="mt-2 text-2xl font-semibold text-ink dark:text-gh-text">
+                              {item.label}
+                            </div>
+                            <div className="mt-2 text-lg font-semibold text-accent dark:text-gh-accent">
+                              {item.rangeEndUtc
+                                ? `${formatTimeZoned(item.timeUtc, timeZone)} – ${formatTimeZoned(
+                                    item.rangeEndUtc,
+                                    timeZone
+                                  )}`
+                                : formatTimeZoned(item.timeUtc, timeZone)}
+                            </div>
+                          </div>
+                        </div>
+                        <Sparkle className="h-4 w-4 text-accent dark:text-gh-accent" />
                       </div>
                       {selectedUpcomingId === item.id ? (
                         <div className="mt-3 text-sm text-ink dark:text-gh-text">{item.prep}</div>
@@ -920,9 +1014,36 @@ export default function App() {
             </>
           )}
         </div>
+        {nextThreeTimeline.length > rowsPerView ? (
+          <div className="mt-auto pt-4 flex w-full flex-col gap-2">
+            <button
+              className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-panel-strong px-4 py-3 text-sm dark:border-gh-border"
+              type="button"
+              onClick={() =>
+                setUpcomingRowsToShow((prev) => Math.min(maxUpcomingRows, prev + 1))
+              }
+              disabled={!canShowMoreUpcoming}
+            >
+              <ChevronDown className="h-4 w-4" />
+              {canShowMoreUpcoming ? "Show more" : "All shown"}
+            </button>
+            {upcomingRowsToShow > 1 ? (
+              <button
+                className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-panel-strong px-4 py-3 text-sm dark:border-gh-border"
+                type="button"
+                onClick={() => setUpcomingRowsToShow(1)}
+              >
+                Collapse
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
-      <section className="mt-6 rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
+      </div>
+
+      <div className="mt-6 grid gap-6 xl:grid-cols-2">
+      <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 xl:col-span-2">
         <h2 className="flex items-center gap-2 font-display text-2xl">
           <AlarmClock className="h-6 w-6 text-accent dark:text-gh-accent" />
           Next steps
@@ -957,6 +1078,11 @@ export default function App() {
                 {expectedWakeCountdown !== null
                   ? `Expected wake in ${formatCountdown(expectedWakeCountdown)}`
                   : `Expected wake ${formatTimeZoned(outputs.expectedWakeUtc, timeZone)}`}
+              </div>
+            ) : null}
+            {outputs.isAsleep && outputs.expectedWakeUtc ? (
+              <div className="mt-1 text-sm text-muted dark:text-gh-muted">
+                Next: Morning feed and the first wake window.
               </div>
             ) : null}
           {!outputs.isAsleep ? (
@@ -1146,7 +1272,7 @@ export default function App() {
         </div>
       </section>
 
-      <section className="mt-6 rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
+      <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 xl:col-span-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 font-display text-2xl">
             <Gauge className="h-6 w-6 text-accent dark:text-gh-accent" />
@@ -1218,7 +1344,7 @@ export default function App() {
         </div>
       </section>
 
-      <section className="mt-6 rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
+      <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 xl:col-span-2">
         <h2 className="flex items-center gap-2 font-display text-2xl">
           <Activity className="h-6 w-6 text-accent dark:text-gh-accent" />
           Right now
@@ -1238,7 +1364,7 @@ export default function App() {
         </ul>
       </section>
 
-      <section className="mt-6 rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
+      <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 xl:col-span-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 font-display text-2xl">
             <Layers3 className="h-6 w-6 text-accent dark:text-gh-accent" />
@@ -1293,6 +1419,8 @@ export default function App() {
           </div>
         )}
       </section>
+
+      </div>
 
 
       <footer className="mt-6 text-sm text-muted dark:text-gh-muted">
@@ -1482,6 +1610,7 @@ export default function App() {
           </div>
         </div>
       ) : null}
+
     </div>
   );
 }
