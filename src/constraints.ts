@@ -20,9 +20,12 @@ export const defaultConfig: ConstraintConfig = {
   // Late-day naps must be capped to keep sleep pressure intact for bedtime.
   nextNapCapMinIfLateNap: 40,
   // Long feed gaps can destabilize regulation, so we track max intervals.
+  feedIntervalMinMin: 120,
   feedIntervalMaxMin: 180,
   // Used to estimate expected wake when asleep.
   expectedNapDurationMin: 60,
+  // Used to estimate expected wake during night sleep.
+  nightSleepDurationMin: 600,
 };
 
 const minutesFromMs = (ms: number) => Math.round(ms / MS_MIN);
@@ -232,7 +235,7 @@ export const computeOutputs = (
       status: shorten ? "applied" : "pending",
     });
     shifts.push({
-      delta: `Nap after ${config.lateNapHour}:00 → bedtime cap −${config.bedtimeEarlierByMinIfLateNap} min`,
+      delta: `Nap after 3:00 PM → bedtime cap −${config.bedtimeEarlierByMinIfLateNap} min`,
       status: lateNap ? "applied" : "pending",
     });
 
@@ -265,7 +268,16 @@ export const computeOutputs = (
     });
   }
 
-  if (currentlyAsleep && state.lastNapStart) {
+  const lastEvent = state.eventLog.length > 0 ? state.eventLog[state.eventLog.length - 1] : null;
+  const lastEventType = lastEvent?.type ?? null;
+  const lastAsleepUtc =
+    [...state.eventLog]
+      .filter((event) => event.type === "Asleep")
+      .map((event) => Date.parse(event.timestampUtc))
+      .pop() ?? null;
+  const isNightSleep = currentlyAsleep && lastEventType === "Asleep";
+
+  if (currentlyAsleep && state.lastNapStart && !isNightSleep) {
     const lateNap =
       state.lastNapEnd !== null &&
       getZonedParts(state.lastNapEnd, timeZone).hour >= config.lateNapHour;
@@ -274,14 +286,20 @@ export const computeOutputs = (
       : config.expectedNapDurationMin;
     expectedWakeUtc = addMinutes(state.lastNapStart, estimatedDuration);
   }
+  if (isNightSleep && lastAsleepUtc) {
+    expectedWakeUtc = addMinutes(lastAsleepUtc, config.nightSleepDurationMin);
+  }
 
-  if (currentlyAsleep && state.lastNapStart) {
-    const asleepMin = minutesFromMs(now - state.lastNapStart);
-    summary.push(`Asleep for ${asleepMin} min`);
-    if (expectedWakeUtc) {
-      summary.push(`Expected wake ${formatTime(expectedWakeUtc, timeZone)}`);
-    } else {
-      summary.push("Expected wake —");
+  if (currentlyAsleep) {
+    const asleepStartUtc = isNightSleep ? lastAsleepUtc : state.lastNapStart;
+    const asleepMin = asleepStartUtc ? minutesFromMs(now - asleepStartUtc) : 0;
+    summary.push(`Snoozing for ${asleepMin} min`);
+    if (!isNightSleep) {
+      if (expectedWakeUtc) {
+        summary.push(`Expected wake ${formatTime(expectedWakeUtc, timeZone)}`);
+      } else {
+        summary.push("Expected wake —");
+      }
     }
   } else if (state.lastWakeTime) {
     const awakeMin = minutesFromMs(now - state.lastWakeTime);

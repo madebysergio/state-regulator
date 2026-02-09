@@ -3,12 +3,14 @@ import {
   Activity,
   AlarmClock,
   AlertTriangle,
+  Trash2,
   ChevronDown,
   ChevronUp,
   ClipboardList,
   Gauge,
   Info,
   Layers3,
+  Moon,
   Sparkles,
   Timer,
 } from "lucide-react";
@@ -28,11 +30,57 @@ const EVENT_TYPES: { type: EventType; label: string; hint: string }[] = [
 ];
 
 const MS_MIN = 60 * 1000;
+const CUSTOM_SOFT_STOPS_KEY = "reactive-care-scheduler:soft-stops";
+
+type SoftStopAnchor = "wake" | "solids" | "routine";
+type CustomSoftStop = {
+  id: string;
+  label: string;
+  anchor: SoftStopAnchor;
+  offsetMin: number;
+};
+
+const loadCustomSoftStops = (): CustomSoftStop[] => {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(CUSTOM_SOFT_STOPS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as CustomSoftStop[];
+    return Array.isArray(parsed)
+      ? parsed.filter(
+          (item) =>
+            item &&
+            typeof item === "object" &&
+            typeof item.id === "string" &&
+            typeof item.label === "string" &&
+            (item.anchor === "wake" || item.anchor === "solids" || item.anchor === "routine") &&
+            typeof item.offsetMin === "number"
+        )
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveCustomSoftStops = (stops: CustomSoftStop[]) => {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(CUSTOM_SOFT_STOPS_KEY, JSON.stringify(stops));
+};
 
 const EVENT_LABELS = EVENT_TYPES.reduce<Record<EventType, string>>((acc, event) => {
   acc[event.type] = event.label;
   return acc;
 }, {} as Record<EventType, string>);
+
+const EVENT_ICONS: Record<EventType, JSX.Element> = {
+  FirstAwake: <Timer className="h-5 w-5 text-accent dark:text-gh-accent" />,
+  RoutineStarted: <Sparkles className="h-5 w-5 text-accent dark:text-gh-accent" />,
+  MilkGiven: <Activity className="h-5 w-5 text-accent dark:text-gh-accent" />,
+  SolidsGiven: <Activity className="h-5 w-5 text-accent dark:text-gh-accent" />,
+  NapStarted: <AlarmClock className="h-5 w-5 text-accent dark:text-gh-accent" />,
+  NapEnded: <AlarmClock className="h-5 w-5 text-accent dark:text-gh-accent" />,
+  Asleep: <Moon className="h-5 w-5 text-accent dark:text-gh-accent" />,
+};
 
 const formatTimeZoned = (utcMs: number, timeZone: string) =>
   new Intl.DateTimeFormat("en-US", {
@@ -121,6 +169,22 @@ const StatusIcon = ({ variant }: { variant: "allowed" | "suppressed" }) => (
   </svg>
 );
 
+const getStateIcon = (item: string) => {
+  if (item.startsWith("Snoozing") || item.startsWith("Asleep")) {
+    return <Moon className="h-5 w-5 text-accent dark:text-gh-accent" />;
+  }
+  if (item.startsWith("Expected wake") || item.startsWith("Last slept")) {
+    return <AlarmClock className="h-5 w-5 text-accent dark:text-gh-accent" />;
+  }
+  if (item.startsWith("Last feed") || item.startsWith("No feed")) {
+    return <Activity className="h-5 w-5 text-accent dark:text-gh-accent" />;
+  }
+  if (item.startsWith("Regulation level")) {
+    return <Gauge className="h-5 w-5 text-accent dark:text-gh-accent" />;
+  }
+  return <Timer className="h-5 w-5 text-accent dark:text-gh-accent" />;
+};
+
 export default function App() {
   const initialNowRef = useRef<number | null>(null);
   const shiftInitRef = useRef(false);
@@ -136,13 +200,20 @@ export default function App() {
   const [editValue, setEditValue] = useState<string>("");
   const [shiftExpanded, setShiftExpanded] = useState<boolean>(true);
   const [eventLogExpanded, setEventLogExpanded] = useState<boolean>(false);
+  const [eventLogSort, setEventLogSort] = useState<"latest" | "oldest">("latest");
   const [selectedUpcomingId, setSelectedUpcomingId] = useState<string | null>(null);
+  const [predictionsUpdatedAt, setPredictionsUpdatedAt] = useState<string | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     if (typeof window === "undefined") return "light";
     const stored = window.localStorage.getItem("reactive-care-scheduler:theme");
     if (stored === "dark" || stored === "light") return stored;
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   });
+  const [customSoftStops, setCustomSoftStops] = useState<CustomSoftStop[]>([]);
+  const [softStopFormOpen, setSoftStopFormOpen] = useState(false);
+  const [softStopLabel, setSoftStopLabel] = useState("Play time");
+  const [softStopAnchor, setSoftStopAnchor] = useState<SoftStopAnchor>("wake");
+  const [softStopOffset, setSoftStopOffset] = useState(20);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -151,7 +222,15 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNowUtcMs(Date.now()), 30 * 1000);
+    setCustomSoftStops(loadCustomSoftStops());
+  }, []);
+
+  useEffect(() => {
+    saveCustomSoftStops(customSoftStops);
+  }, [customSoftStops]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowUtcMs(Date.now()), 10 * 1000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -180,6 +259,13 @@ export default function App() {
   useEffect(() => {
     setState((prev) => rebuildFromLog(prev.eventLog, nowUtcMs));
   }, [nowUtcMs]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setPredictionsUpdatedAt(formatTimeZoned(nowUtcMs, timeZone));
+    }, 120);
+    return () => window.clearTimeout(timeout);
+  }, [state.eventLog]);
 
 
   const outputs = useMemo(
@@ -231,25 +317,60 @@ export default function App() {
   const napInProgress =
     state.lastNapStart !== null &&
     (state.lastNapEnd === null || state.lastNapEnd < state.lastNapStart);
+  const lastEventType =
+    state.eventLog.length > 0 ? state.eventLog[state.eventLog.length - 1].type : null;
+  const isNightSleep = outputs.isAsleep && lastEventType === "Asleep";
   const canLog: Record<EventType, boolean> = {
-    FirstAwake: state.lastWakeTime === null,
-    RoutineStarted: !outputs.isAsleep && state.lastWakeTime !== null,
+    FirstAwake: true,
+    RoutineStarted: true,
     MilkGiven: true,
     SolidsGiven: true,
-    NapStarted: !napInProgress,
-    NapEnded: napInProgress,
-    Asleep: !outputs.isAsleep,
+    NapStarted: true,
+    NapEnded: true,
+    Asleep: true,
   };
-  const nextExpectedEvent: EventType | null = outputs.isAsleep
-    ? "NapEnded"
-    : state.lastWakeTime === null
-    ? "FirstAwake"
-    : napInProgress
-    ? "NapEnded"
-    : wakeRemaining !== null && wakeRemaining <= 30
-    ? "RoutineStarted"
-    : "NapStarted";
+  const nextExpectedEvent: EventType | null =
+    state.lastWakeTime === null
+      ? "FirstAwake"
+      : napInProgress
+      ? "NapEnded"
+      : outputs.isAsleep && isNightSleep
+      ? null
+      : wakeRemaining !== null && wakeRemaining <= 30
+      ? "RoutineStarted"
+      : outputs.isAsleep
+      ? null
+      : "NapStarted";
 
+  const orderedEvents = (() => {
+    const base = [...EVENT_TYPES];
+    if (!canLog.FirstAwake) {
+      const firstAwakeIndex = base.findIndex((event) => event.type === "FirstAwake");
+      if (firstAwakeIndex > -1) {
+        const [item] = base.splice(firstAwakeIndex, 1);
+        base.push(item);
+      }
+    }
+    return base;
+  })();
+
+  const feedWindowStartUtc = state.lastFeedTime && !outputs.isAsleep
+    ? state.lastFeedTime + defaultConfig.feedIntervalMinMin * MS_MIN
+    : null;
+  const feedWindowEndUtc = state.lastFeedTime && !outputs.isAsleep
+    ? state.lastFeedTime + defaultConfig.feedIntervalMaxMin * MS_MIN
+    : null;
+  const morningFeedWindowStartUtc =
+    outputs.isAsleep && outputs.expectedWakeUtc ? outputs.expectedWakeUtc : null;
+  const morningFeedWindowEndUtc =
+    outputs.isAsleep && outputs.expectedWakeUtc
+      ? outputs.expectedWakeUtc + 45 * MS_MIN
+      : null;
+
+  const lastEventUtc =
+    state.eventLog.length > 0
+      ? Date.parse(state.eventLog[state.eventLog.length - 1].timestampUtc)
+      : nowUtcMs;
   const upcomingCandidates = [
     outputs.expectedWakeUtc
       ? {
@@ -276,12 +397,22 @@ export default function App() {
           prep: "Wind down, reduce stimulation",
         }
       : null,
-    state.lastFeedTime
+    feedWindowStartUtc && feedWindowEndUtc
       ? {
           id: "next-feed",
           label: "Feed window",
-          timeUtc: state.lastFeedTime + defaultConfig.feedIntervalMaxMin * MS_MIN,
+          timeUtc: feedWindowStartUtc,
+          rangeEndUtc: feedWindowEndUtc,
           prep: "Prep feeding supplies",
+        }
+      : null,
+    morningFeedWindowStartUtc && morningFeedWindowEndUtc
+      ? {
+          id: "morning-feed",
+          label: "Morning feed",
+          timeUtc: morningFeedWindowStartUtc,
+          rangeEndUtc: morningFeedWindowEndUtc,
+          prep: "Warm bottle, prep solids",
         }
       : null,
   ].filter(Boolean) as {
@@ -293,8 +424,92 @@ export default function App() {
   }[];
 
   const timelineItems = upcomingCandidates
-    .filter((item) => item.timeUtc >= nowUtcMs && item.timeUtc <= nowUtcMs + 4 * 60 * MS_MIN)
-    .sort((a, b) => a.timeUtc - b.timeUtc);
+    .filter((item) => {
+      const windowEnd = item.rangeEndUtc ?? item.timeUtc;
+      const baseline = Math.max(nowUtcMs, lastEventUtc);
+      const horizonEnd = outputs.isAsleep
+        ? outputs.expectedWakeUtc
+          ? outputs.expectedWakeUtc + 2 * 60 * MS_MIN
+          : nowUtcMs + 4 * 60 * MS_MIN
+        : outputs.nextHardStopUtc ?? nowUtcMs + 4 * 60 * MS_MIN;
+      const inWindow = baseline <= windowEnd;
+      if (!inWindow) return false;
+      if (item.rangeEndUtc) {
+        return item.timeUtc <= horizonEnd;
+      }
+      return item.timeUtc >= baseline && item.timeUtc <= horizonEnd;
+    })
+    .map((item) => {
+      const baseline = Math.max(nowUtcMs, lastEventUtc);
+      const effectiveTimeUtc = item.rangeEndUtc
+        ? Math.max(item.timeUtc, baseline)
+        : item.timeUtc;
+      return { ...item, effectiveTimeUtc };
+    })
+    .sort((a, b) => a.effectiveTimeUtc - b.effectiveTimeUtc);
+  const nextThreeTimeline = timelineItems;
+  const sortedEventLog = [...state.eventLog].sort((a, b) =>
+    eventLogSort === "latest"
+      ? Date.parse(b.timestampUtc) - Date.parse(a.timestampUtc)
+      : Date.parse(a.timestampUtc) - Date.parse(b.timestampUtc)
+  );
+  const lastRoutineStartUtc =
+    [...state.eventLog]
+      .filter((event) => event.type === "RoutineStarted")
+      .map((event) => Date.parse(event.timestampUtc))
+      .pop() ?? null;
+  const lastSolidsUtc =
+    [...state.eventLog]
+      .filter((event) => event.type === "SolidsGiven")
+      .map((event) => Date.parse(event.timestampUtc))
+      .pop() ?? null;
+  const softStops = [
+    {
+      label: "Play time",
+      timeUtc: state.lastWakeTime ? state.lastWakeTime + 20 * MS_MIN : null,
+    },
+    {
+      label: "Snack",
+      timeUtc: lastSolidsUtc ? lastSolidsUtc + 150 * MS_MIN : null,
+    },
+    {
+      label: "Routine reset",
+      timeUtc: lastRoutineStartUtc ? lastRoutineStartUtc + 45 * MS_MIN : null,
+    },
+  ].filter((item) => item.timeUtc !== null) as { label: string; timeUtc: number }[];
+  const customSoftStopsCalculated = customSoftStops
+    .map((item) => {
+      const anchorTime =
+        item.anchor === "wake"
+          ? state.lastWakeTime
+          : item.anchor === "solids"
+          ? lastSolidsUtc
+          : lastRoutineStartUtc;
+      return {
+        label: item.label,
+        timeUtc: anchorTime ? anchorTime + item.offsetMin * MS_MIN : null,
+      };
+    })
+    .filter((item) => item.timeUtc !== null) as { label: string; timeUtc: number }[];
+  const allSoftStops = [...softStops, ...customSoftStopsCalculated].sort(
+    (a, b) => a.timeUtc - b.timeUtc
+  );
+
+  const currentStatus = outputs.isAsleep
+    ? "Snoozing"
+    : napInProgress
+    ? "Napping"
+    : state.lastFeedTime && nowUtcMs - state.lastFeedTime < 30 * MS_MIN
+    ? "Bottle Feeding"
+    : state.lastWakeTime && nowUtcMs - state.lastWakeTime < 30 * MS_MIN
+    ? "Active Routine"
+    : "Playing";
+
+  useEffect(() => {
+    if (selectedUpcomingId && !timelineItems.find((item) => item.id === selectedUpcomingId)) {
+      setSelectedUpcomingId(null);
+    }
+  }, [selectedUpcomingId, timelineItems]);
 
   useEffect(() => {
     if (!editId) return;
@@ -336,15 +551,34 @@ export default function App() {
 
   const clearAll = () => setState(initialAppState);
 
+  const deleteEvent = (eventId: string) => {
+    setState((prev) => {
+      const eventLog = prev.eventLog.filter((event) => event.id !== eventId);
+      return rebuildFromLog(eventLog, nowUtcMs);
+    });
+  };
+
+  const addCustomSoftStop = () => {
+    const trimmed = softStopLabel.trim();
+    if (!trimmed) return;
+    const offsetValue = Number(softStopOffset);
+    if (!Number.isFinite(offsetValue) || offsetValue <= 0) return;
+    const newStop: CustomSoftStop = {
+      id: `soft-stop-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      label: trimmed,
+      anchor: softStopAnchor,
+      offsetMin: offsetValue,
+    };
+    setCustomSoftStops((prev) => [...prev, newStop]);
+    setSoftStopLabel("Play time");
+    setSoftStopAnchor("wake");
+    setSoftStopOffset(20);
+    setSoftStopFormOpen(false);
+  };
+
   return (
     <div className="min-h-screen bg-app px-6 pb-16 pt-8 text-ink dark:bg-app-dark dark:text-gh-text md:px-12 md:pt-10 lg:px-16 lg:pt-12">
-      <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-muted dark:text-gh-muted">Reactive regulator</p>
-          <h1 className="font-display text-4xl leading-tight md:text-5xl">
-            Care Scheduling System
-          </h1>
-        </div>
+      <header className="flex items-center justify-end">
         <button
           className="inline-flex items-center gap-2 rounded-full border border-panel-strong bg-white px-4 py-2 text-sm font-semibold text-ink shadow-sm dark:border-gh-border dark:bg-gh-surface dark:text-gh-text"
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
@@ -361,23 +595,188 @@ export default function App() {
         </strong>
       </section>
 
+      <section className="mt-4 rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="flex items-center gap-2 font-display text-2xl">
+            <ClipboardList className="h-6 w-6 text-accent dark:text-gh-accent" />
+            Event log
+          </h2>
+          <div className="flex items-center gap-2">
+            <span className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+              Sort
+            </span>
+            <select
+              className="rounded-full border border-panel-strong bg-white px-3 py-2 text-sm dark:border-gh-border dark:bg-gh-surface"
+              value={eventLogSort}
+              onChange={(eventTarget) =>
+                setEventLogSort(eventTarget.target.value as "latest" | "oldest")
+              }
+            >
+              <option value="latest">Latest</option>
+              <option value="oldest">Oldest</option>
+            </select>
+          </div>
+        </div>
+        {eventCount === 0 ? (
+          <div className="mt-3 text-sm text-muted dark:text-gh-muted">No events logged yet.</div>
+        ) : (
+          <div className="mt-4 flex flex-col gap-3">
+            {(eventLogExpanded ? sortedEventLog : sortedEventLog.slice(0, 2)).map((event) => (
+              <div
+                key={event.id}
+                className="flex min-h-[64px] flex-wrap items-center justify-between gap-4 rounded-xl bg-white p-4 dark:bg-gh-surface-2"
+              >
+                <div className="flex items-center gap-3">
+                  {EVENT_ICONS[event.type]}
+                  <div className="flex flex-col gap-1">
+                    <strong className="text-base">{EVENT_LABELS[event.type]}</strong>
+                    <span className="text-xl font-semibold">
+                      {formatTimeZoned(Date.parse(event.timestampUtc), timeZone)}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {editId === event.id ? (
+                    <>
+                      <div className="flex items-center gap-2 rounded-full border border-panel-strong bg-white px-4 py-3 shadow-[0_0_0_1px_rgba(0,0,0,0.02)] dark:border-gh-border dark:bg-gh-surface">
+                        <input
+                          type="datetime-local"
+                          className="bg-transparent text-sm outline-none"
+                          value={editValue}
+                          onChange={(eventTarget) => setEditValue(eventTarget.target.value)}
+                        />
+                        <span className="flex h-7 w-7 items-center justify-center rounded-full border border-panel-strong text-muted">
+                          <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+                            <path
+                              d="M7 3v2M17 3v2M4 8h16M5 6h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </span>
+                      </div>
+                      <button
+                        className="rounded-full bg-accent px-6 py-3 text-base font-semibold text-white"
+                        onClick={commitEdit}
+                        type="button"
+                      >
+                        Save
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="rounded-full border border-panel-strong px-6 py-3 text-base dark:border-gh-border"
+                      onClick={() => startEdit(event.id)}
+                      type="button"
+                    >
+                      Edit time
+                    </button>
+                  )}
+                  <button
+                    className="flex h-11 w-11 items-center justify-center rounded-full border border-panel-strong text-muted dark:border-gh-border dark:text-gh-muted"
+                    onClick={() => deleteEvent(event.id)}
+                    type="button"
+                    aria-label="Delete log"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {eventCount > 2 ? (
+          <button
+            className="mt-4 inline-flex items-center gap-2 rounded-full border border-panel-strong px-4 py-2 text-sm dark:border-gh-border"
+            onClick={() => setEventLogExpanded(!eventLogExpanded)}
+            type="button"
+          >
+            {eventLogExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            {eventLogExpanded ? "Hide" : "Show all"}
+          </button>
+        ) : null}
+      </section>
+
+      <section className="mt-6 rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
+        <h2 className="flex items-center gap-2 font-display text-2xl">
+          <Activity className="h-6 w-6 text-accent dark:text-gh-accent" />
+          Care updates
+        </h2>
+        <div className="mt-4 h-[110px] snap-y snap-mandatory overflow-y-auto pr-2">
+          {orderedEvents.map((event) => {
+            const highlightRoutine =
+              event.type === "RoutineStarted" &&
+              outputs.pressureIndicator.regulationRisk === "rising" &&
+              (outputs.pressureIndicator.wakeUtilization ?? 0) >= 0.85 &&
+              outputs.windowCategories.allowed.includes("Routine reset");
+            const isNext = nextExpectedEvent === event.type;
+            return (
+              <button
+                key={event.type}
+                className={`w-full min-h-[76px] snap-start rounded-2xl border px-5 py-4 text-left text-base transition ${
+                  selectedEvent === event.type
+                    ? "border-accent bg-accent-soft dark:bg-gh-surface-2"
+                    : "border-transparent bg-white dark:bg-gh-surface-2"
+                } ${highlightRoutine || isNext ? "ring-2 ring-accent/30 border-accent" : ""}`}
+                onClick={() => setSelectedEvent(event.type)}
+                type="button"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    {EVENT_ICONS[event.type]}
+                    <div>
+                      <span className="block text-lg font-medium">{event.label}</span>
+                      <small className="text-sm text-muted dark:text-gh-muted">{event.hint}</small>
+                    </div>
+                  </div>
+                  {isNext ? (
+                    <span className="rounded-full border border-accent px-3 py-1 text-xs uppercase tracking-[0.1em] text-accent">
+                      Up next
+                    </span>
+                  ) : null}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button
+            className="rounded-full border border-accent px-6 py-3 text-base font-semibold text-accent"
+            onClick={addEvent}
+            type="button"
+          >
+            Log {EVENT_TYPES.find((event) => event.type === selectedEvent)?.label}
+          </button>
+          <button
+            className="rounded-full border border-panel-strong px-6 py-3 text-base dark:border-gh-border"
+            onClick={clearAll}
+            type="button"
+          >
+            Reset day
+          </button>
+        </div>
+      </section>
+
       <section className="mt-6 rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 font-display text-2xl">
             <Timer className="h-6 w-6 text-accent dark:text-gh-accent" />
             Upcoming events
           </h2>
-          <button
-            className="rounded-full bg-accent px-6 py-3 text-base font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={() => setSelectedUpcomingId(timelineItems[0]?.id ?? null)}
-            type="button"
-            disabled={timelineItems.length === 0}
-          >
-            What should I prep?
-          </button>
+          {predictionsUpdatedAt ? (
+            <span className="rounded-full border border-panel-strong px-3 py-1 text-xs uppercase tracking-[0.08em] text-muted dark:border-gh-border dark:text-gh-muted">
+              Updated {predictionsUpdatedAt}
+            </span>
+          ) : null}
+        </div>
+        <div className="mt-2 text-sm text-muted dark:text-gh-muted">
+          Upcoming events update after each log. Times reflect the most recent activity.
         </div>
         <div className="mt-4 min-h-[140px] rounded-2xl bg-white p-4 dark:bg-gh-surface-2">
-          {timelineItems.length === 0 ? (
+          {nextThreeTimeline.length === 0 ? (
             <div className="flex h-full items-center gap-3 text-sm text-muted dark:text-gh-muted">
               <div className="h-10 w-40 animate-pulse rounded-full bg-panel-strong dark:bg-gh-border" />
               Calculating...
@@ -387,8 +786,12 @@ export default function App() {
               <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-full border border-panel-strong text-xs uppercase tracking-[0.2em] text-muted dark:border-gh-border dark:text-gh-muted">
                 Now
               </div>
-              {timelineItems.map((item) => {
-                const minutes = Math.max(0, Math.ceil((item.timeUtc - nowUtcMs) / MS_MIN));
+              {nextThreeTimeline.map((item) => {
+                const minutes = Math.max(
+                  0,
+                  Math.ceil((item.effectiveTimeUtc - nowUtcMs) / MS_MIN)
+                );
+                const showStatus = minutes <= 0;
                 const urgency =
                   minutes <= 15
                     ? "border-suppressed/40 text-suppressed"
@@ -407,7 +810,7 @@ export default function App() {
                     type="button"
                   >
                     <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-                      {`in ${formatCountdown(minutes)}`}
+                      {showStatus ? currentStatus : `in ${formatCountdown(minutes)}`}
                     </div>
                     <div className="mt-2 text-lg font-semibold text-ink dark:text-gh-text">
                       {item.label}
@@ -443,10 +846,10 @@ export default function App() {
             </div>
             <div className="mt-3 flex flex-wrap items-baseline gap-3">
               {outputs.isAsleep ? (
-                <span className="text-4xl font-semibold text-ink dark:text-gh-text">Asleep</span>
+                <span className="text-4xl font-semibold text-ink dark:text-gh-text">Snoozing</span>
               ) : nextWindowCountdown !== null ? (
                 <span className="text-4xl font-semibold text-ink dark:text-gh-text">
-                  {formatCountdown(nextWindowCountdown)}
+                  {nextWindowCountdown === 0 ? currentStatus : formatCountdown(nextWindowCountdown)}
                 </span>
               ) : (
                 <span className="text-2xl font-semibold text-muted dark:text-gh-muted animate-pulse">
@@ -466,61 +869,177 @@ export default function App() {
                   : `Expected wake ${formatTimeZoned(outputs.expectedWakeUtc, timeZone)}`}
               </div>
             ) : null}
-            {!outputs.isAsleep ? (
-              <div className="mt-4 border-t border-panel-strong pt-3 dark:border-gh-border">
-                <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-                  Allowed now
-                </div>
-                <ul className="mt-2 grid gap-2">
-                  {outputs.windowCategories.allowed.map((item) => (
-                    <li key={item} className="flex items-center gap-2 text-allowed">
-                      <StatusIcon variant="allowed" />
-                      <span className="text-sm text-ink dark:text-gh-text">{item}</span>
-                    </li>
-                  ))}
-                </ul>
-                <div className="mt-3 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-                  Suppressed now
-                </div>
-                <ul className="mt-2 grid gap-2">
-                  {outputs.windowCategories.suppressed.map((item) => (
-                    <li key={item} className="flex items-center gap-2 text-suppressed">
-                      <StatusIcon variant="suppressed" />
-                      <span className="text-sm text-ink dark:text-gh-text">{item}</span>
-                    </li>
-                  ))}
-                </ul>
+          {!outputs.isAsleep ? (
+            <div className="mt-4 border-t border-panel-strong pt-3 dark:border-gh-border">
+              <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                Allowed now
               </div>
-            ) : null}
-          </div>
-          <div className="rounded-2xl bg-white p-5 dark:bg-gh-surface-2">
-            <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-              Next hard stop
+              <ul className="mt-2 grid gap-2">
+                {outputs.windowCategories.allowed.map((item) => (
+                  <li key={item} className="flex items-center gap-2 text-allowed">
+                    <StatusIcon variant="allowed" />
+                    <span className="text-sm text-ink dark:text-gh-text">{item}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-3 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                Suppressed now
+              </div>
+              <ul className="mt-2 grid gap-2">
+                {outputs.windowCategories.suppressed.map((item) => (
+                  <li key={item} className="flex items-center gap-2 text-suppressed">
+                    <StatusIcon variant="suppressed" />
+                    <span className="text-sm text-ink dark:text-gh-text">{item}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-3 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                Recommended activities
+              </div>
+              <ul className="mt-2 grid gap-2">
+                {outputs.activityCategories.allowed.map((item) => (
+                  <li key={item.label} className="flex items-center gap-2 text-allowed">
+                    <StatusIcon variant="allowed" />
+                    <span className="text-sm text-ink dark:text-gh-text">{item.label}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
-            <div className="mt-3 flex flex-wrap items-baseline gap-3">
-              {hardStopCountdown !== null ? (
-                <span className="text-4xl font-semibold text-ink dark:text-gh-text">
-                  {formatCountdown(hardStopCountdown)}
-                </span>
-              ) : (
-                <span className="text-2xl font-semibold text-muted dark:text-gh-muted animate-pulse">
-                  Calculating...
-                </span>
-              )}
+          ) : null}
+        </div>
+        <div className="rounded-2xl bg-white p-5 dark:bg-gh-surface-2">
+          <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+            Next soft stops
+          </div>
+          {outputs.isAsleep || allSoftStops.length === 0 ? (
+            <div className="mt-2 text-sm text-muted dark:text-gh-muted">—</div>
+          ) : (
+            <ul className="mt-3 grid gap-3">
+              {allSoftStops.map((stop) => {
+                const countdown = Math.max(0, Math.ceil((stop.timeUtc - nowUtcMs) / MS_MIN));
+                return (
+                  <li
+                    key={`${stop.label}-${stop.timeUtc}`}
+                    className="rounded-xl border border-panel-strong px-4 py-3 dark:border-gh-border"
+                  >
+                    <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                      {stop.label}
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-baseline gap-3">
+                      <span className="text-4xl font-semibold text-ink dark:text-gh-text">
+                        {countdown === 0 ? currentStatus : formatCountdown(countdown)}
+                      </span>
+                      <span className="text-sm text-muted dark:text-gh-muted">
+                        at {formatTimeZoned(stop.timeUtc, timeZone)}
+                      </span>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <div className="mt-4 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+            Next hard stop
+          </div>
+          {outputs.isAsleep ? (
+            <div className="mt-2 text-sm text-muted dark:text-gh-muted">—</div>
+          ) : (
+            <>
+              <div className="mt-3 flex flex-wrap items-baseline gap-3">
+                {hardStopCountdown !== null ? (
+                  <span className="text-4xl font-semibold text-ink dark:text-gh-text">
+                    {hardStopCountdown === 0 ? currentStatus : formatCountdown(hardStopCountdown)}
+                  </span>
+                ) : (
+                  <span className="text-2xl font-semibold text-muted dark:text-gh-muted animate-pulse">
+                    Calculating...
+                  </span>
+                )}
+                {outputs.nextHardStopUtc ? (
+                  <span className="text-sm text-muted dark:text-gh-muted">
+                    at {formatTimeZoned(outputs.nextHardStopUtc, timeZone)}
+                  </span>
+                ) : null}
+              </div>
               {outputs.nextHardStopUtc ? (
-                <span className="text-sm text-muted dark:text-gh-muted">
-                  at {formatTimeZoned(outputs.nextHardStopUtc, timeZone)}
-                </span>
+                <div className="mt-3 text-sm text-ink dark:text-gh-text">
+                  After solids → Wind down for bottle → Nap (estimated{" "}
+                  {formatTimeZoned(outputs.nextHardStopUtc, timeZone)})
+                </div>
+              ) : null}
+            </>
+          )}
+          <div className="mt-4 flex flex-col items-start gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                className="rounded-full border border-panel-strong px-5 py-2.5 text-sm font-semibold dark:border-gh-border"
+                type="button"
+                onClick={() => setSoftStopFormOpen((prev) => !prev)}
+              >
+                {softStopFormOpen ? "Close soft stop" : "Add soft stop"}
+              </button>
+              {softStopFormOpen ? (
+                <button
+                  className="rounded-full border border-panel-strong px-5 py-2.5 text-sm font-semibold dark:border-gh-border"
+                  type="button"
+                  onClick={() => setSoftStopFormOpen(false)}
+                >
+                  Cancel
+                </button>
               ) : null}
             </div>
-            {outputs.nextHardStopUtc ? (
-              <div className="mt-3 text-sm text-ink dark:text-gh-text">
-                After solids → Wind down for bottle → Nap (estimated{" "}
-                {formatTimeZoned(outputs.nextHardStopUtc, timeZone)})
+            {softStopFormOpen ? (
+              <div className="w-full max-w-xl rounded-2xl border border-panel-strong bg-white p-4 dark:border-gh-border dark:bg-gh-surface-2">
+                <div className="grid gap-3 md:grid-cols-3">
+                  <label className="flex flex-col gap-1 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                    Label
+                    <input
+                      className="rounded-full border border-panel-strong bg-white px-4 py-2 text-sm text-ink dark:border-gh-border dark:bg-gh-surface dark:text-gh-text"
+                      value={softStopLabel}
+                      onChange={(eventTarget) => setSoftStopLabel(eventTarget.target.value)}
+                      placeholder="Play time"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                    Anchor
+                    <select
+                      className="rounded-full border border-panel-strong bg-white px-4 py-2 text-sm dark:border-gh-border dark:bg-gh-surface"
+                      value={softStopAnchor}
+                      onChange={(eventTarget) =>
+                        setSoftStopAnchor(eventTarget.target.value as SoftStopAnchor)
+                      }
+                    >
+                      <option value="wake">After wake</option>
+                      <option value="solids">After solids</option>
+                      <option value="routine">After routine</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                    Offset (min)
+                    <input
+                      type="number"
+                      min={5}
+                      step={5}
+                      className="rounded-full border border-panel-strong bg-white px-4 py-2 text-sm text-ink dark:border-gh-border dark:bg-gh-surface dark:text-gh-text"
+                      value={softStopOffset}
+                      onChange={(eventTarget) => setSoftStopOffset(Number(eventTarget.target.value))}
+                    />
+                  </label>
+                </div>
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    className="rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-white"
+                    type="button"
+                    onClick={addCustomSoftStop}
+                  >
+                    Save soft stop
+                  </button>
+                </div>
               </div>
             ) : null}
           </div>
         </div>
+      </div>
         <div className="mt-4 flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted dark:text-gh-muted">
           <div className="h-px flex-1 bg-panel-strong dark:bg-gh-border" />
           <ChevronDown className="h-4 w-4" />
@@ -553,11 +1072,18 @@ export default function App() {
                   : outputs.pressureIndicator.regulationRisk === "rising"
                   ? "text-warning"
                   : "text-allowed"
-              } ${wakeRemaining === null ? "animate-pulse" : ""}`}
+              } ${wakeRemaining === null && !outputs.isAsleep ? "animate-pulse" : ""}`}
             >
-              {wakeRemaining !== null ? `${wakeRemaining} min remaining` : "Calculating..."}
+              {outputs.isAsleep
+                ? currentStatus
+                : wakeRemaining !== null
+                ? `${wakeRemaining} min remaining`
+                : "Calculating..."}
             </div>
-            {outputs.pressureIndicator.regulationRisk !== "low" ? (
+            {outputs.isAsleep ? (
+              <Moon className="h-6 w-6 text-accent dark:text-gh-accent" />
+            ) : null}
+            {!outputs.isAsleep && outputs.pressureIndicator.regulationRisk !== "low" ? (
               <AlertTriangle
                 className={`h-6 w-6 ${
                   outputs.pressureIndicator.regulationRisk === "high"
@@ -568,7 +1094,9 @@ export default function App() {
             ) : null}
           </div>
           <div className="mt-2 text-sm text-muted dark:text-gh-muted">
-            {outputs.pressureIndicator.regulationRisk === "high"
+            {outputs.isAsleep
+              ? "Snoozing"
+              : outputs.pressureIndicator.regulationRisk === "high"
               ? "Approaching overtired window"
               : outputs.pressureIndicator.regulationRisk === "rising"
               ? "Window tightening"
@@ -595,75 +1123,18 @@ export default function App() {
       <section className="mt-6 rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
         <h2 className="flex items-center gap-2 font-display text-2xl">
           <Activity className="h-6 w-6 text-accent dark:text-gh-accent" />
-          Quick event input
-        </h2>
-        <div className="mt-4 flex flex-col gap-3">
-          {EVENT_TYPES.map((event) => {
-            const highlightRoutine =
-              event.type === "RoutineStarted" &&
-              outputs.pressureIndicator.regulationRisk === "rising" &&
-              (outputs.pressureIndicator.wakeUtilization ?? 0) >= 0.85 &&
-              outputs.windowCategories.allowed.includes("Routine reset");
-            const isNext = nextExpectedEvent === event.type;
-            return (
-              <button
-                key={event.type}
-                className={`w-full min-h-[72px] rounded-2xl border px-5 py-4 text-left text-base transition ${
-                  selectedEvent === event.type
-                    ? "border-accent bg-accent-soft dark:bg-gh-surface-2"
-                    : "border-transparent bg-white dark:bg-gh-surface-2"
-                } ${highlightRoutine || isNext ? "ring-2 ring-accent/30 border-accent" : ""} ${
-                  !canLog[event.type] ? "cursor-not-allowed opacity-50" : ""
-                }`}
-                onClick={() => setSelectedEvent(event.type)}
-                type="button"
-                disabled={!canLog[event.type]}
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="block text-lg font-medium">{event.label}</span>
-                    <small className="text-sm text-muted dark:text-gh-muted">{event.hint}</small>
-                  </div>
-                  {isNext ? (
-                    <span className="rounded-full border border-accent px-3 py-1 text-xs uppercase tracking-[0.1em] text-accent">
-                      Up next
-                    </span>
-                  ) : null}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-        <div className="mt-4 flex flex-wrap gap-3">
-          <button
-            className="rounded-full border border-accent px-6 py-3 text-base font-semibold text-accent"
-            onClick={addEvent}
-            type="button"
-          >
-            Log {EVENT_TYPES.find((event) => event.type === selectedEvent)?.label}
-          </button>
-          <button
-            className="rounded-full border border-panel-strong px-6 py-3 text-base dark:border-gh-border"
-            onClick={clearAll}
-            type="button"
-          >
-            Reset day
-          </button>
-        </div>
-      </section>
-
-      <section className="mt-6 rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
-        <h2 className="flex items-center gap-2 font-display text-2xl">
-          <Activity className="h-6 w-6 text-accent dark:text-gh-accent" />
           Current system state
         </h2>
         <ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {outputs.stateSummary.map((item) => (
+          {outputs.stateSummary.map((item, index) => (
             <li
-              key={item}
+              key={`${item}-${index}`}
               className="rounded-xl bg-white p-5 text-base font-medium dark:bg-gh-surface-2"
             >
-              {item}
+              <div className="flex items-center gap-3">
+                {getStateIcon(item)}
+                <span>{item}</span>
+              </div>
             </li>
           ))}
         </ul>
@@ -725,82 +1196,6 @@ export default function App() {
         )}
       </section>
 
-      <section className="mt-6 rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="flex items-center gap-2 font-display text-2xl">
-            <ClipboardList className="h-6 w-6 text-accent dark:text-gh-accent" />
-            Event log
-          </h2>
-          {eventCount > 0 ? (
-            <button
-              className="inline-flex items-center gap-2 rounded-full border border-panel-strong px-4 py-2 text-sm dark:border-gh-border"
-              onClick={() => setEventLogExpanded(!eventLogExpanded)}
-              type="button"
-            >
-              {eventLogExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              {eventLogExpanded ? "Hide" : "Show"}
-            </button>
-          ) : null}
-        </div>
-        {eventCount === 0 ? (
-          <div className="mt-3 text-sm text-muted dark:text-gh-muted">No events logged yet.</div>
-        ) : (
-          <div className="mt-4 flex flex-col gap-3">
-            {(eventLogExpanded ? state.eventLog : state.eventLog.slice(0, 2)).map((event) => (
-              <div
-                key={event.id}
-                className="flex min-h-[64px] flex-wrap items-center justify-between gap-4 rounded-xl bg-white p-4 dark:bg-gh-surface-2"
-              >
-                <div className="flex flex-col gap-1">
-                  <strong className="text-base">{EVENT_LABELS[event.type]}</strong>
-                  <span className="text-xl font-semibold">
-                    {formatTimeZoned(Date.parse(event.timestampUtc), timeZone)}
-                  </span>
-                </div>
-                {editId === event.id ? (
-                  <div className="flex flex-wrap items-center gap-3">
-                    <div className="flex items-center gap-2 rounded-full border border-panel-strong bg-white px-4 py-3 shadow-[0_0_0_1px_rgba(0,0,0,0.02)] dark:border-gh-border dark:bg-gh-surface">
-                      <input
-                        type="datetime-local"
-                        className="bg-transparent text-sm outline-none"
-                        value={editValue}
-                        onChange={(eventTarget) => setEditValue(eventTarget.target.value)}
-                      />
-                      <span className="flex h-7 w-7 items-center justify-center rounded-full border border-panel-strong text-muted">
-                        <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
-                          <path
-                            d="M7 3v2M17 3v2M4 8h16M5 6h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.5"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      </span>
-                    </div>
-                    <button
-                      className="rounded-full bg-accent px-6 py-3 text-base font-semibold text-white"
-                      onClick={commitEdit}
-                      type="button"
-                    >
-                      Save
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    className="rounded-full border border-panel-strong px-6 py-3 text-base dark:border-gh-border"
-                    onClick={() => startEdit(event.id)}
-                    type="button"
-                  >
-                    Edit time
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
 
       <footer className="mt-6 text-sm text-muted dark:text-gh-muted">
         <p>State-driven regulator</p>

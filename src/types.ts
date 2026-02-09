@@ -43,8 +43,10 @@ export type ConstraintConfig = {
   routineLatencyMin: number;
   setupLatencyMin: number;
   nextNapCapMinIfLateNap: number;
+  feedIntervalMinMin: number;
   feedIntervalMaxMin: number;
   expectedNapDurationMin: number;
+  nightSleepDurationMin: number;
 };
 
 export type OutputModel = {
