@@ -322,6 +322,26 @@ export const computeOutputs = (
   }
 
   summary.push(`How baby's doing: ${state.regulationLevel}`);
+  const careScore = Math.max(
+    Math.min(1, state.estimatedSleepPressure),
+    state.timeSinceLastFeed ? Math.min(1, state.timeSinceLastFeed / (240 * MS_MIN)) : 0
+  );
+  let careLabel = "Mostly settled";
+  if (careScore <= 0.2) {
+    careLabel = "Very settled";
+  } else if (careScore <= 0.4) {
+    careLabel = "Mostly settled";
+  } else if (careScore <= 0.6) {
+    let energySub = "medium energy";
+    if (state.estimatedSleepPressure < 0.5) energySub = "full energy";
+    if (state.estimatedSleepPressure > 0.55) energySub = "low energy";
+    careLabel = `Energy: ${energySub}`;
+  } else if (careScore <= 0.8) {
+    careLabel = "Needs a break";
+  } else {
+    careLabel = "Overtired / overwhelmed";
+  }
+  summary[summary.length - 1] = `How baby's doing: ${careLabel}`;
 
   return {
     stateSummary: summary,
