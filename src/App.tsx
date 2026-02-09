@@ -10,11 +10,20 @@ import {
   Gauge,
   Info,
   Layers3,
-  Moon,
-  Sparkles,
-  Timer,
   X,
 } from "lucide-react";
+import {
+  Baby,
+  Cake,
+  Clock,
+  Moon,
+  MoonStars,
+  Smiley,
+  Sparkle,
+  StarFour,
+  Sun,
+  SunHorizon,
+} from "phosphor-react";
 import { computeOutputs, defaultConfig } from "./constraints";
 import { applyEvent, buildEvent, initialAppState, rebuildFromLog } from "./state";
 import { EventType } from "./types";
@@ -75,13 +84,13 @@ const EVENT_LABELS = EVENT_TYPES.reduce<Record<EventType, string>>((acc, event) 
 }, {} as Record<EventType, string>);
 
 const EVENT_ICONS: Record<EventType, JSX.Element> = {
-  FirstAwake: <Timer className="h-5 w-5 text-accent dark:text-gh-accent" />,
-  RoutineStarted: <Sparkles className="h-5 w-5 text-accent dark:text-gh-accent" />,
-  MilkGiven: <Activity className="h-5 w-5 text-accent dark:text-gh-accent" />,
-  SolidsGiven: <Activity className="h-5 w-5 text-accent dark:text-gh-accent" />,
-  NapStarted: <AlarmClock className="h-5 w-5 text-accent dark:text-gh-accent" />,
-  NapEnded: <AlarmClock className="h-5 w-5 text-accent dark:text-gh-accent" />,
-  Asleep: <Moon className="h-5 w-5 text-accent dark:text-gh-accent" />,
+  FirstAwake: <Sun className="h-5 w-5 text-accent dark:text-gh-accent" />,
+  RoutineStarted: <Sparkle className="h-5 w-5 text-accent dark:text-gh-accent" />,
+  MilkGiven: <Baby className="h-5 w-5 text-accent dark:text-gh-accent" />,
+  SolidsGiven: <Cake className="h-5 w-5 text-accent dark:text-gh-accent" />,
+  NapStarted: <MoonStars className="h-5 w-5 text-accent dark:text-gh-accent" />,
+  NapEnded: <Moon className="h-5 w-5 text-accent dark:text-gh-accent" />,
+  Asleep: <MoonStars className="h-5 w-5 text-accent dark:text-gh-accent" />,
 };
 
 const formatTimeZoned = (utcMs: number, timeZone: string) =>
@@ -181,18 +190,18 @@ const StatusIcon = ({ variant }: { variant: "allowed" | "suppressed" }) => (
 
 const getStateIcon = (item: string) => {
   if (item.startsWith("Sleeping") || item.startsWith("Asleep")) {
-    return <Moon className="h-5 w-5 text-accent dark:text-gh-accent" />;
+    return <MoonStars className="h-5 w-5 text-accent dark:text-gh-accent" />;
   }
   if (item.startsWith("Expected wake") || item.startsWith("Last slept")) {
-    return <AlarmClock className="h-5 w-5 text-accent dark:text-gh-accent" />;
+    return <SunHorizon className="h-5 w-5 text-accent dark:text-gh-accent" />;
   }
   if (item.startsWith("Last feed") || item.startsWith("No feed")) {
-    return <Activity className="h-5 w-5 text-accent dark:text-gh-accent" />;
+    return <Baby className="h-5 w-5 text-accent dark:text-gh-accent" />;
   }
   if (item.startsWith("How baby's doing")) {
-    return <Gauge className="h-5 w-5 text-accent dark:text-gh-accent" />;
+    return <Smiley className="h-5 w-5 text-accent dark:text-gh-accent" />;
   }
-  return <Timer className="h-5 w-5 text-accent dark:text-gh-accent" />;
+  return <StarFour className="h-5 w-5 text-accent dark:text-gh-accent" />;
 };
 
 export default function App() {
@@ -226,6 +235,7 @@ export default function App() {
   const [softStopOffset, setSoftStopOffset] = useState(20);
   const [toasts, setToasts] = useState<{ id: string; message: string }[]>([]);
   const [softStopModalOpen, setSoftStopModalOpen] = useState(false);
+  const [wakeInfoOpen, setWakeInfoOpen] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -652,19 +662,22 @@ export default function App() {
             Today's log
           </h2>
           <div className="flex items-center gap-2">
-            <span className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+            <span className="min-w-[44px] pl-1 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
               Sort
             </span>
-            <select
-              className="rounded-full border border-panel-strong bg-white px-3 py-2 text-sm dark:border-gh-border dark:bg-gh-surface"
-              value={eventLogSort}
-              onChange={(eventTarget) =>
-                setEventLogSort(eventTarget.target.value as "latest" | "oldest")
-              }
-            >
-              <option value="latest">Latest</option>
-              <option value="oldest">Oldest</option>
-            </select>
+            <div className="relative">
+              <select
+                className="appearance-none rounded-full border border-panel-strong bg-white px-3 py-2 pr-10 text-sm dark:border-gh-border dark:bg-gh-surface"
+                value={eventLogSort}
+                onChange={(eventTarget) =>
+                  setEventLogSort(eventTarget.target.value as "latest" | "oldest")
+                }
+              >
+                <option value="latest">Latest</option>
+                <option value="oldest">Oldest</option>
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted dark:text-gh-muted" />
+            </div>
           </div>
         </div>
         <div className="mt-4">
@@ -713,20 +726,20 @@ export default function App() {
             </div>
             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-b from-transparent to-panel dark:to-gh-surface" />
           </div>
-          <div className="mt-4 flex flex-wrap gap-3">
+          <div className="mt-4 flex w-full flex-col gap-3">
             <button
-              className={`rounded-full border border-accent px-6 py-3 text-base font-semibold text-accent transition-all duration-300 ${EASE_CURVE}`}
+              className={`w-full rounded-full bg-accent px-6 py-3 text-base font-semibold text-white transition-all duration-300 ${EASE_CURVE}`}
               onClick={addEvent}
               type="button"
             >
               Log {EVENT_TYPES.find((event) => event.type === selectedEvent)?.label}
             </button>
             <button
-              className={`rounded-full border border-panel-strong px-6 py-3 text-base transition-all duration-300 ${EASE_CURVE} dark:border-gh-border`}
+              className={`w-full rounded-full border border-panel-strong bg-white px-6 py-3 text-base transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:bg-gh-surface`}
               onClick={clearAll}
               type="button"
             >
-            Start over
+              Start over
             </button>
           </div>
         </div>
@@ -816,7 +829,7 @@ export default function App() {
         </div>
         {eventCount > 2 ? (
           <button
-            className="mt-4 inline-flex items-center gap-2 rounded-full border border-panel-strong px-4 py-2 text-sm dark:border-gh-border"
+            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-full border border-panel-strong px-4 py-3 text-sm dark:border-gh-border"
             onClick={() => setEventLogModalOpen(true)}
             type="button"
           >
@@ -829,7 +842,7 @@ export default function App() {
       <section className="mt-6 rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 font-display text-2xl">
-            <Timer className="h-6 w-6 text-accent dark:text-gh-accent" />
+            <Clock className="h-6 w-6 text-accent dark:text-gh-accent" />
             What's coming up
           </h2>
           {predictionsUpdatedAt ? (
@@ -839,63 +852,72 @@ export default function App() {
           ) : null}
         </div>
         <div className="mt-2 text-sm text-muted dark:text-gh-muted">
-          Upcoming events update after each log. Times reflect the most recent activity.
+          Updates after each log.
         </div>
-        <div className="mt-4 min-h-[140px] rounded-2xl bg-white p-4 dark:bg-gh-surface-2">
+        <div className="mt-4 rounded-2xl bg-white p-5 dark:bg-gh-surface-2">
           {nextThreeTimeline.length === 0 ? (
             <div className="flex h-full items-center gap-3 text-sm text-muted dark:text-gh-muted">
               <div className="h-10 w-40 animate-pulse rounded-full bg-panel-strong dark:bg-gh-border" />
               Calculating...
             </div>
           ) : (
-            <div className="flex gap-3 overflow-x-auto pb-2">
-              <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-full border border-panel-strong text-xs uppercase tracking-[0.2em] text-muted dark:border-gh-border dark:text-gh-muted">
+            <>
+              <div className="text-xs uppercase tracking-[0.2em] text-muted dark:text-gh-muted">
                 Now
               </div>
-              {nextThreeTimeline.map((item) => {
-                const minutes = Math.max(
-                  0,
-                  Math.ceil((item.effectiveTimeUtc - nowUtcMs) / MS_MIN)
-                );
-                const showStatus = minutes <= 0;
-                const urgency =
-                  minutes <= 15
-                    ? "border-suppressed/40 text-suppressed"
-                    : minutes <= 30
-                    ? "border-warning/40 text-warning"
-                    : "border-allowed/40 text-allowed";
-                return (
-                <button
-                  key={item.id}
-                  className={`min-h-[100px] min-w-[180px] rounded-2xl border bg-white p-4 text-left transition-all duration-300 ${EASE_CURVE} dark:bg-gh-surface ${urgency} ${
-                    selectedUpcomingId === item.id ? "ring-2 ring-accent/30" : ""
-                  }`}
-                  onClick={() =>
-                    setSelectedUpcomingId(selectedUpcomingId === item.id ? null : item.id)
-                  }
-                    type="button"
-                  >
-                    <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-                      {showStatus ? currentStatus : `in ${formatCountdown(minutes)}`}
-                    </div>
-                    <div className="mt-2 text-lg font-semibold text-ink dark:text-gh-text">
-                      {item.label}
-                    </div>
-                    <div className="mt-1 text-sm text-muted dark:text-gh-muted">
-                      {item.rangeEndUtc
-                        ? `${formatTimeZoned(item.timeUtc, timeZone)} – ${formatTimeZoned(
-                            item.rangeEndUtc,
-                            timeZone
-                          )}`
-                        : formatTimeZoned(item.timeUtc, timeZone)}
-                    </div>
-                    {selectedUpcomingId === item.id ? (
-                      <div className="mt-3 text-sm text-ink dark:text-gh-text">{item.prep}</div>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
+              <div className="mt-3 flex flex-col gap-4">
+                {nextThreeTimeline.map((item) => {
+                  const minutes = Math.max(
+                    0,
+                    Math.ceil((item.effectiveTimeUtc - nowUtcMs) / MS_MIN)
+                  );
+                  const showStatus = minutes <= 0;
+                  const upcomingIcon =
+                    item.id === "expected-wake" ? (
+                      <SunHorizon className="h-5 w-5 text-accent dark:text-gh-accent" />
+                    ) : item.id === "morning-feed" ? (
+                      <Baby className="h-5 w-5 text-accent dark:text-gh-accent" />
+                    ) : item.id === "next-feed" ? (
+                      <Baby className="h-5 w-5 text-accent dark:text-gh-accent" />
+                    ) : item.id === "nap-window" ? (
+                      <MoonStars className="h-5 w-5 text-accent dark:text-gh-accent" />
+                    ) : (
+                      <Sparkle className="h-5 w-5 text-accent dark:text-gh-accent" />
+                    );
+                  return (
+                    <button
+                      key={item.id}
+                      className={`w-full rounded-2xl border border-allowed/40 bg-white p-5 text-left transition-all duration-300 ${EASE_CURVE} dark:border-allowed/30 dark:bg-gh-surface-2 ${
+                        selectedUpcomingId === item.id ? "ring-2 ring-accent/30" : ""
+                      }`}
+                      onClick={() =>
+                        setSelectedUpcomingId(selectedUpcomingId === item.id ? null : item.id)
+                      }
+                      type="button"
+                    >
+                      <div className="flex items-center justify-between text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                        <span>{showStatus ? currentStatus : `in ${formatCountdown(minutes)}`}</span>
+                        {upcomingIcon}
+                      </div>
+                      <div className="mt-3 text-2xl font-semibold text-ink dark:text-gh-text">
+                        {item.label}
+                      </div>
+                      <div className="mt-2 text-lg font-semibold text-accent dark:text-gh-accent">
+                        {item.rangeEndUtc
+                          ? `${formatTimeZoned(item.timeUtc, timeZone)} – ${formatTimeZoned(
+                              item.rangeEndUtc,
+                              timeZone
+                            )}`
+                          : formatTimeZoned(item.timeUtc, timeZone)}
+                      </div>
+                      {selectedUpcomingId === item.id ? (
+                        <div className="mt-3 text-sm text-ink dark:text-gh-text">{item.prep}</div>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
           )}
         </div>
       </section>
@@ -1035,11 +1057,11 @@ export default function App() {
               ) : null}
             </>
           )}
-          <div className="mt-4 flex flex-col items-start gap-3">
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="mt-4 flex w-full flex-col items-start gap-3">
+            <div className="flex w-full flex-col items-stretch gap-3">
               {!softStopFormOpen ? (
                 <button
-                  className={`rounded-full border border-panel-strong px-5 py-2.5 text-sm font-semibold transition-all duration-300 ${EASE_CURVE} dark:border-gh-border`}
+                  className={`w-full rounded-full bg-accent px-5 py-3 text-sm font-semibold text-white transition-all duration-300 ${EASE_CURVE}`}
                   type="button"
                   onClick={() => setSoftStopFormOpen(true)}
                 >
@@ -1047,7 +1069,7 @@ export default function App() {
                 </button>
               ) : (
                 <button
-                  className={`rounded-full border border-panel-strong px-5 py-2.5 text-sm font-semibold transition-all duration-300 ${EASE_CURVE} dark:border-gh-border`}
+                  className={`w-full rounded-full border border-panel-strong bg-white px-5 py-3 text-sm font-semibold transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:bg-gh-surface`}
                   type="button"
                   onClick={() => setSoftStopFormOpen(false)}
                 >
@@ -1055,7 +1077,7 @@ export default function App() {
                 </button>
               )}
               <button
-                className={`rounded-full border border-panel-strong px-5 py-2.5 text-sm font-semibold transition-all duration-300 ${EASE_CURVE} dark:border-gh-border`}
+                className={`w-full rounded-full border border-panel-strong bg-white px-5 py-3 text-sm font-semibold transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:bg-gh-surface`}
                 type="button"
                 onClick={() => setSoftStopModalOpen(true)}
               >
@@ -1131,7 +1153,7 @@ export default function App() {
           <button
             className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted"
             type="button"
-            title="Wake window utilization tracks time since last wake against the max window."
+            onClick={() => setWakeInfoOpen(true)}
           >
             <Info className="h-4 w-4" />
             Info
@@ -1155,7 +1177,7 @@ export default function App() {
                 : "Calculating..."}
             </div>
             {outputs.isAsleep ? (
-              <Moon className="h-6 w-6 text-accent dark:text-gh-accent" />
+              <MoonStars className="h-6 w-6 text-accent dark:text-gh-accent" />
             ) : null}
             {!outputs.isAsleep && outputs.pressureIndicator.regulationRisk !== "low" ? (
               <AlertTriangle
@@ -1230,7 +1252,7 @@ export default function App() {
           </button>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-panel-strong bg-accent-soft px-4 py-3 text-sm dark:border-gh-border dark:bg-gh-surface-2">
-          <Sparkles className="h-4 w-4 text-accent dark:text-gh-accent" />
+          <Sparkle className="h-4 w-4 text-accent dark:text-gh-accent" />
           <span className="text-ink dark:text-gh-text">
             Updated {shiftUpdatedAt} based on {eventCount} logged events
           </span>
@@ -1300,19 +1322,22 @@ export default function App() {
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-xl font-semibold text-ink dark:text-gh-text">Full log</h3>
             <div className="flex items-center gap-2">
-              <span className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+              <span className="min-w-[44px] pl-1 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
                 Sort
               </span>
-              <select
-                className="rounded-full border border-panel-strong bg-white px-3 py-2 text-sm dark:border-gh-border dark:bg-gh-surface"
-                value={eventLogSort}
-                onChange={(eventTarget) =>
-                  setEventLogSort(eventTarget.target.value as "latest" | "oldest")
-                }
-              >
-                <option value="latest">Latest</option>
-                <option value="oldest">Oldest</option>
-              </select>
+              <div className="relative">
+                <select
+                  className="appearance-none rounded-full border border-panel-strong bg-white px-3 py-2 pr-10 text-sm dark:border-gh-border dark:bg-gh-surface"
+                  value={eventLogSort}
+                  onChange={(eventTarget) =>
+                    setEventLogSort(eventTarget.target.value as "latest" | "oldest")
+                  }
+                >
+                  <option value="latest">Latest</option>
+                  <option value="oldest">Oldest</option>
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted dark:text-gh-muted" />
+              </div>
             </div>
             <button
               className="flex h-10 w-10 items-center justify-center rounded-full border border-panel-strong text-muted dark:border-gh-border dark:text-gh-muted"
@@ -1421,6 +1446,37 @@ export default function App() {
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      ) : null}
+
+      {wakeInfoOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-6">
+          <button
+            className="absolute inset-0 bg-black/40"
+            type="button"
+            aria-label="Close time until tired info"
+            onClick={() => setWakeInfoOpen(false)}
+          />
+          <div className="relative w-full max-w-xl rounded-2xl border border-panel-strong bg-white p-6 shadow-panel dark:border-gh-border dark:bg-gh-surface dark:shadow-panel-dark">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-xl font-semibold text-ink dark:text-gh-text">
+                Time until tired
+              </h3>
+              <button
+                className="flex h-10 w-10 items-center justify-center rounded-full border border-panel-strong text-muted dark:border-gh-border dark:text-gh-muted"
+                type="button"
+                aria-label="Close"
+                onClick={() => setWakeInfoOpen(false)}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mt-4 text-sm text-muted dark:text-gh-muted">
+              This meter tracks time since the last wake and how close the day is to the tired zone.
+              Green is comfortable, amber means the window is tightening, and red means it’s
+              getting late for rest.
+            </div>
           </div>
         </div>
       ) : null}
