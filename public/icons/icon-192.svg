@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192" role="img" aria-label="Care Scheduler">
+  <rect width="192" height="192" rx="36" fill="#0f1722"/>
+  <circle cx="96" cy="96" r="64" fill="#122236"/>
+  <path d="M64 98c0-18 14-32 32-32h4c18 0 32 14 32 32v8c0 22-18 40-40 40h-1c-18 0-31-14-31-31v-17z" fill="#2dd4bf" opacity="0.92"/>
+  <circle cx="82" cy="92" r="5" fill="#0f1722"/>
+  <circle cx="110" cy="92" r="5" fill="#0f1722"/>
+  <path d="M80 110c6 6 14 9 20 9s14-3 20-9" stroke="#0f1722" stroke-width="6" stroke-linecap="round" fill="none"/>
+</svg>
