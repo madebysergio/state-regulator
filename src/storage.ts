@@ -23,7 +23,10 @@ export const loadState = (nowUtcMs: number): AppState => {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return initialAppState;
-    const parsed = JSON.parse(raw) as { eventLog?: CareEvent[] };
+    const parsed = JSON.parse(raw) as {
+      eventLog?: CareEvent[];
+      autoSuppressed?: { type: string; timestampUtc: string }[];
+    };
     const eventLog = (parsed.eventLog ?? []).map((event) => {
       if (event && typeof event === "object") {
         const record = event as Record<string, unknown>;
@@ -46,7 +49,17 @@ export const loadState = (nowUtcMs: number): AppState => {
         timestampUtc: new Date(nowUtcMs).toISOString(),
       } as CareEvent;
     });
-    return rebuildFromLog(eventLog, nowUtcMs);
+    const autoSuppressed = (parsed.autoSuppressed ?? []).filter(
+      (entry) => entry && typeof entry === "object" && "type" in entry && "timestampUtc" in entry
+    ) as { type: string; timestampUtc: string }[];
+    return rebuildFromLog(
+      eventLog,
+      nowUtcMs,
+      autoSuppressed.map((entry) => ({
+        type: entry.type as CareEvent["type"],
+        timestampUtc: String(entry.timestampUtc),
+      }))
+    );
   } catch {
     return initialAppState;
   }
@@ -54,6 +67,9 @@ export const loadState = (nowUtcMs: number): AppState => {
 
 export const saveState = (state: AppState) => {
   if (typeof window === "undefined") return;
-  const payload = JSON.stringify({ eventLog: state.eventLog });
+  const payload = JSON.stringify({
+    eventLog: state.eventLog,
+    autoSuppressed: state.autoSuppressed,
+  });
   window.localStorage.setItem(STORAGE_KEY, payload);
 };

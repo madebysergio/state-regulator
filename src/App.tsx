@@ -145,6 +145,15 @@ const formatCountdown = (minutes: number) => {
   return `${hours}h ${mins}m`;
 };
 
+const formatAge = (minutes: number) => {
+  if (minutes <= 0) return "Just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (mins === 0) return `${hours} hr ago`;
+  return `${hours} hr ${mins} min ago`;
+};
+
 const getTimeZoneOffsetMs = (utcMs: number, timeZone: string) => {
   const parts = getZonedParts(utcMs, timeZone);
   const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute);
@@ -392,6 +401,13 @@ export default function App() {
         base.push(item);
       }
     }
+    if (nextExpectedEvent) {
+      const nextIndex = base.findIndex((event) => event.type === nextExpectedEvent);
+      if (nextIndex > -1) {
+        const [item] = base.splice(nextIndex, 1);
+        base.unshift(item);
+      }
+    }
     return base;
   })();
 
@@ -408,10 +424,21 @@ export default function App() {
       ? outputs.expectedWakeUtc + 45 * MS_MIN
       : null;
 
-  const lastEventUtc =
-    state.eventLog.length > 0
-      ? Date.parse(state.eventLog[state.eventLog.length - 1].timestampUtc)
-      : nowUtcMs;
+  const meaningfulEventTypes = new Set<EventType>([
+    "FirstAwake",
+    "NapStarted",
+    "NapEnded",
+    "MilkGiven",
+    "SolidsGiven",
+    "Asleep",
+  ]);
+  const lastMeaningfulUtc =
+    [...state.eventLog]
+      .filter((event) => meaningfulEventTypes.has(event.type))
+      .map((event) => Date.parse(event.timestampUtc))
+      .filter((timestamp) => !Number.isNaN(timestamp) && timestamp <= nowUtcMs)
+      .pop() ?? null;
+  const baselineUtc = lastMeaningfulUtc ?? nowUtcMs;
   const upcomingCandidates = [
     outputs.expectedWakeUtc
       ? {
@@ -534,7 +561,7 @@ export default function App() {
   const timelineItems = [...upcomingCandidates, ...dayUpcoming]
     .filter((item) => {
       const windowEnd = item.rangeEndUtc ?? item.timeUtc;
-      const baseline = Math.max(nowUtcMs, lastEventUtc);
+      const baseline = Math.max(nowUtcMs, baselineUtc);
       const horizonEnd =
         outputs.nextHardStopUtc && outputs.nextHardStopUtc > nowUtcMs
           ? outputs.nextHardStopUtc
@@ -547,7 +574,7 @@ export default function App() {
       return item.timeUtc >= baseline && item.timeUtc <= horizonEnd;
     })
     .map((item) => {
-      const baseline = Math.max(nowUtcMs, lastEventUtc);
+      const baseline = Math.max(nowUtcMs, baselineUtc);
       const effectiveTimeUtc = item.rangeEndUtc
         ? Math.max(item.timeUtc, baseline)
         : item.timeUtc;
@@ -668,14 +695,21 @@ export default function App() {
     const newTimestampUtc = getUtcMsFromZoned({ year, month, day, hour, minute }, timeZone);
     if (Number.isNaN(newTimestampUtc)) return;
     setState((prev) => {
+      const target = prev.eventLog.find((event) => event.id === editId);
+      const updatedTimestampUtc = new Date(newTimestampUtc).toISOString();
       const eventLog = prev.eventLog.map((event) =>
-        event.id === editId
-          ? { ...event, timestampUtc: new Date(newTimestampUtc).toISOString() }
-          : event
+        event.id === editId ? { ...event, timestampUtc: updatedTimestampUtc } : event
       );
+      const autoSuppressed = target?.autoPredicted
+        ? [
+            ...prev.autoSuppressed,
+            { type: target.type, timestampUtc: target.timestampUtc },
+          ]
+        : prev.autoSuppressed;
       return rebuildFromLog(
         eventLog.sort((a, b) => Date.parse(a.timestampUtc) - Date.parse(b.timestampUtc)),
-        nowUtcMs
+        nowUtcMs,
+        autoSuppressed
       );
     });
     setEditId(null);
@@ -689,8 +723,15 @@ export default function App() {
 
   const deleteEvent = (eventId: string) => {
     setState((prev) => {
+      const target = prev.eventLog.find((event) => event.id === eventId);
       const eventLog = prev.eventLog.filter((event) => event.id !== eventId);
-      return rebuildFromLog(eventLog, nowUtcMs);
+      const autoSuppressed = target?.autoPredicted
+        ? [
+            ...prev.autoSuppressed,
+            { type: target.type, timestampUtc: target.timestampUtc },
+          ]
+        : prev.autoSuppressed;
+      return rebuildFromLog(eventLog, nowUtcMs, autoSuppressed);
     });
   };
 
@@ -854,9 +895,22 @@ export default function App() {
                           {EVENT_ICONS[event.type]}
                           <div className="flex flex-col gap-1">
                             <strong className="text-base">{EVENT_LABELS[event.type]}</strong>
+                            {event.autoPredicted ? (
+                              <small className="text-sm text-muted dark:text-gh-muted">
+                                auto-predicted
+                              </small>
+                            ) : null}
                             <span className="text-xl font-semibold">
                               {formatTimeZoned(Date.parse(event.timestampUtc), timeZone)}
                             </span>
+                            <small className="text-sm text-muted dark:text-gh-muted">
+                              {formatAge(
+                                Math.max(
+                                  0,
+                                  Math.round((nowUtcMs - Date.parse(event.timestampUtc)) / MS_MIN)
+                                )
+                              )}
+                            </small>
                           </div>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
@@ -1078,7 +1132,7 @@ export default function App() {
             <div className="mt-3 flex flex-wrap items-baseline gap-3">
               {outputs.isAsleep ? (
                 <span className="text-4xl font-semibold text-ink dark:text-gh-text">
-                  Morning wake
+                  Expected wake
                 </span>
               ) : nextWindowCountdown !== null ? (
                 <span className="text-4xl font-semibold text-ink dark:text-gh-text">
@@ -1323,7 +1377,9 @@ export default function App() {
               {outputs.isAsleep
                 ? currentStatus
                 : wakeRemaining !== null
-                ? `${wakeRemaining} min remaining`
+                ? wakeRemaining === 0 && outputs.pressureIndicator.regulationRisk === "high"
+                  ? "Overtired"
+                  : `${wakeRemaining} min remaining`
                 : "Calculating..."}
             </div>
             {outputs.isAsleep ? (
@@ -1343,7 +1399,9 @@ export default function App() {
             {outputs.isAsleep
               ? "Sleeping"
               : outputs.pressureIndicator.regulationRisk === "high"
-              ? "Approaching overtired window"
+              ? wakeRemaining === 0
+                ? "Overtired window"
+                : "Approaching overtired window"
               : outputs.pressureIndicator.regulationRisk === "rising"
               ? "Window tightening"
               : "Window stable"}
@@ -1496,9 +1554,22 @@ export default function App() {
                           {EVENT_ICONS[event.type]}
                           <div className="flex flex-col gap-1">
                             <strong className="text-base">{EVENT_LABELS[event.type]}</strong>
+                            {event.autoPredicted ? (
+                              <small className="text-sm text-muted dark:text-gh-muted">
+                                auto-predicted
+                              </small>
+                            ) : null}
                             <span className="text-xl font-semibold">
                               {formatTimeZoned(Date.parse(event.timestampUtc), timeZone)}
                             </span>
+                            <small className="text-sm text-muted dark:text-gh-muted">
+                              {formatAge(
+                                Math.max(
+                                  0,
+                                  Math.round((nowUtcMs - Date.parse(event.timestampUtc)) / MS_MIN)
+                                )
+                              )}
+                            </small>
                           </div>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
