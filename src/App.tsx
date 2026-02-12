@@ -79,7 +79,7 @@ const EVENT_ICONS: Record<EventType, JSX.Element> = {
 const formatTimeZoned = (utcMs: number, timeZone: string) =>
   new Intl.DateTimeFormat("en-US", {
     timeZone,
-    hour: "2-digit",
+    hour: "numeric",
     minute: "2-digit",
   }).format(new Date(utcMs));
 
@@ -877,19 +877,17 @@ export default function App() {
                     {group.events.slice(0, 2).map((event) => (
                       <div
                         key={event.id}
-                        className="flex min-h-[64px] flex-wrap items-center justify-between gap-4 rounded-xl bg-white p-4 fade-in dark:bg-gh-surface-2"
+                        className="flex min-h-[64px] flex-col items-start gap-4 rounded-xl bg-white p-4 fade-in dark:bg-gh-surface-2 sm:flex-row sm:items-center sm:justify-between"
                       >
-                        <div className="flex items-center gap-3">
-                          {EVENT_ICONS[event.type]}
-                          <div className="flex flex-col gap-1">
-                            <div className="flex items-center justify-between gap-2">
-                              <strong className="text-[24px]">{EVENT_LABELS[event.type]}</strong>
-                              {event.autoPredicted ? (
-                                <small className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-[9px] uppercase tracking-[0.16em] text-accent dark:border-gh-accent/50 dark:bg-gh-accent/10 dark:text-gh-accent">
-                                  auto-predicted
-                                </small>
-                              ) : null}
-                            </div>
+                        <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:gap-3">
+                          <div className="sm:shrink-0">{EVENT_ICONS[event.type]}</div>
+                          <div className="flex w-full flex-col gap-2">
+                            <strong className="text-[24px]">{EVENT_LABELS[event.type]}</strong>
+                            {event.autoPredicted ? (
+                              <small className="w-fit rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-[9px] uppercase tracking-[0.16em] text-accent dark:border-gh-accent/50 dark:bg-gh-accent/10 dark:text-gh-accent">
+                                auto-predicted
+                              </small>
+                            ) : null}
                             <span className="text-base font-semibold text-accent dark:text-gh-accent">
                               {formatTimeZoned(Date.parse(event.timestampUtc), timeZone)}
                             </span>
@@ -903,10 +901,10 @@ export default function App() {
                             </small>
                           </div>
                         </div>
-                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex w-full items-center gap-2 sm:w-auto">
                           {editId === event.id ? (
                             <>
-                              <div className="flex items-center gap-2 rounded-full border border-panel-strong bg-white px-4 py-3 shadow-[0_0_0_1px_rgba(0,0,0,0.02)] dark:border-gh-border dark:bg-gh-surface">
+                              <div className="flex w-full items-center gap-2 rounded-full border border-panel-strong bg-white px-4 py-3 shadow-[0_0_0_1px_rgba(0,0,0,0.02)] dark:border-gh-border dark:bg-gh-surface sm:w-auto">
                                 <input
                                   type="datetime-local"
                                   className="bg-transparent text-sm outline-none"
@@ -927,7 +925,7 @@ export default function App() {
                                 </span>
                               </div>
                               <button
-                                className={`rounded-full bg-accent px-6 py-3 text-base font-semibold text-white transition-all duration-300 ${EASE_CURVE}`}
+                                className={`w-full h-11 rounded-full bg-accent px-6 text-base font-semibold text-white transition-all duration-300 ${EASE_CURVE} sm:w-auto`}
                                 onClick={commitEdit}
                                 type="button"
                               >
@@ -936,7 +934,7 @@ export default function App() {
                             </>
                           ) : (
                             <button
-                              className={`rounded-full border border-panel-strong px-6 py-3 text-base transition-all duration-300 ${EASE_CURVE} dark:border-gh-border`}
+                              className={`w-full h-11 whitespace-nowrap rounded-full border border-panel-strong px-6 text-base transition-all duration-300 ${EASE_CURVE} dark:border-gh-border sm:w-auto`}
                               onClick={() => startEdit(event.id)}
                               type="button"
                             >
@@ -944,7 +942,7 @@ export default function App() {
                             </button>
                           )}
                           <button
-                            className={`flex h-11 w-11 items-center justify-center rounded-full border border-panel-strong text-muted transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:text-gh-muted`}
+                            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-panel-strong text-muted transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:text-gh-muted`}
                             onClick={() => deleteEvent(event.id)}
                             type="button"
                             aria-label="Delete log"
