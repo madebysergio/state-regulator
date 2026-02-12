@@ -30,3 +30,4 @@ npm run preview
 - Auto-predicted logs are labeled and can be edited or deleted.
 - After bedtime, upcoming events show the next morning’s expected wake without creating new logs.
 - Prediction objects use a strict schema to prevent missing fields in the UI.
+- The wake panel reflects “Time until wake” during bedtime instead of tiredness.
