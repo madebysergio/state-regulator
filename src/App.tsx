@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Activity,
   AlarmClock,
@@ -29,6 +29,16 @@ import { applyEvent, buildEvent, initialAppState, rebuildFromLog } from "./state
 import { EventType } from "./types";
 import { loadState, loadTimeZone, saveState, saveTimeZone } from "./storage";
 
+type PredictedType = "milk" | "solids" | "nap" | "bedtime";
+type PredictedEvent = {
+  id: string;
+  type: PredictedType;
+  label: string;
+  timeUtc: number;
+  rangeEndUtc?: number | null;
+  prep: string;
+};
+
 const EVENT_TYPES: { type: EventType; label: string; hint: string }[] = [
   { type: "FirstAwake", label: "First awake", hint: "Day start marker" },
   { type: "RoutineStarted", label: "Routine started", hint: "Prep latency starts" },
@@ -36,47 +46,13 @@ const EVENT_TYPES: { type: EventType; label: string; hint: string }[] = [
   { type: "SolidsGiven", label: "Solids given", hint: "Feed marker" },
   { type: "NapStarted", label: "Nap started", hint: "Sleep block begins" },
   { type: "NapEnded", label: "Nap ended", hint: "Auto-calculates duration" },
-  { type: "Asleep", label: "Asleep", hint: "Night sleep start" },
+  { type: "Asleep", label: "Bedtime", hint: "Night sleep start" },
 ];
 
 const MS_MIN = 60 * 1000;
-const CUSTOM_SOFT_STOPS_KEY = "reactive-care-scheduler:soft-stops";
 const EASE_CURVE = "ease-[cubic-bezier(0.22,0.61,0.36,1)]";
 
-type SoftStopAnchor = "wake" | "solids" | "routine";
-type CustomSoftStop = {
-  id: string;
-  label: string;
-  anchor: SoftStopAnchor;
-  offsetMin: number;
-};
-
-const loadCustomSoftStops = (): CustomSoftStop[] => {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(CUSTOM_SOFT_STOPS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as CustomSoftStop[];
-    return Array.isArray(parsed)
-      ? parsed.filter(
-          (item) =>
-            item &&
-            typeof item === "object" &&
-            typeof item.id === "string" &&
-            typeof item.label === "string" &&
-            (item.anchor === "wake" || item.anchor === "solids" || item.anchor === "routine") &&
-            typeof item.offsetMin === "number"
-        )
-      : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveCustomSoftStops = (stops: CustomSoftStop[]) => {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(CUSTOM_SOFT_STOPS_KEY, JSON.stringify(stops));
-};
+// Flexible reminders removed.
 
 const EVENT_LABELS = EVENT_TYPES.reduce<Record<EventType, string>>((acc, event) => {
   acc[event.type] = event.label;
@@ -198,7 +174,7 @@ const StatusIcon = ({ variant }: { variant: "allowed" | "suppressed" }) => (
 );
 
 const getStateIcon = (item: string) => {
-  if (item.startsWith("Sleeping") || item.startsWith("Asleep")) {
+  if (item.startsWith("Sleeping") || item.startsWith("Bedtime")) {
     return <MoonStars className="h-5 w-5 text-accent dark:text-gh-accent" />;
   }
   if (item.startsWith("Expected wake") || item.startsWith("Last slept")) {
@@ -237,13 +213,7 @@ export default function App() {
     if (stored === "dark" || stored === "light") return stored;
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   });
-  const [customSoftStops, setCustomSoftStops] = useState<CustomSoftStop[]>([]);
-  const [softStopFormOpen, setSoftStopFormOpen] = useState(false);
-  const [softStopLabel, setSoftStopLabel] = useState("Play time");
-  const [softStopAnchor, setSoftStopAnchor] = useState<SoftStopAnchor>("wake");
-  const [softStopOffset, setSoftStopOffset] = useState(20);
   const [toasts, setToasts] = useState<{ id: string; message: string }[]>([]);
-  const [softStopModalOpen, setSoftStopModalOpen] = useState(false);
   const [wakeInfoOpen, setWakeInfoOpen] = useState(false);
   const [isXL, setIsXL] = useState(false);
   const [upcomingRowsToShow, setUpcomingRowsToShow] = useState(1);
@@ -253,14 +223,6 @@ export default function App() {
     window.localStorage.setItem("reactive-care-scheduler:theme", theme);
     document.documentElement.classList.toggle("dark", theme === "dark");
   }, [theme]);
-
-  useEffect(() => {
-    setCustomSoftStops(loadCustomSoftStops());
-  }, []);
-
-  useEffect(() => {
-    saveCustomSoftStops(customSoftStops);
-  }, [customSoftStops]);
 
   const pushToast = (message: string) => {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -383,15 +345,6 @@ export default function App() {
   const feedWindowEndUtc = state.lastFeedTime && !outputs.isAsleep
     ? state.lastFeedTime + defaultConfig.feedIntervalMaxMin * MS_MIN
     : null;
-  type PredictedType = "milk" | "solids" | "nap" | "bedtime";
-  type PredictedEvent = {
-    id: string;
-    type: PredictedType;
-    label: string;
-    timeUtc: number;
-    rangeEndUtc?: number | null;
-    prep: string;
-  };
   const TOLERANCE_WINDOW_MIN = 20;
   const FINAL_WAKE_THRESHOLD_MIN = 240;
 
@@ -469,14 +422,44 @@ export default function App() {
     return null;
   };
 
-  const buildPredictedEvents = () => {
+  const buildPredictedEvents = (): PredictedEvent[] => {
     const realEvents = [...state.eventLog]
-      .filter((event) => !event.autoPredicted)
+      .filter((event) => !event.autoPredicted && event.type !== "RoutineStarted")
       .map((event) => ({ ...event, ts: Date.parse(event.timestampUtc) }))
       .filter((event) => !Number.isNaN(event.ts) && event.ts <= nowUtcMs);
     if (realEvents.length === 0) return [];
 
     const lastReal = realEvents[realEvents.length - 1];
+    if (lastReal.type === "Asleep") {
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      const dayParts = getZonedParts(lastReal.ts, timeZone);
+      const tomorrowParts = {
+        year: dayParts.year,
+        month: dayParts.month,
+        day: dayParts.day + 1,
+      };
+      const atTomorrow = (hour: number, minute: number) =>
+        getUtcMsFromZoned(
+          {
+            year: tomorrowParts.year,
+            month: tomorrowParts.month,
+            day: tomorrowParts.day,
+            hour,
+            minute,
+          },
+          timeZone
+        );
+      return [
+        {
+          id: "tomorrow-wake",
+          type: "bedtime" as const,
+          label: "Expected wake",
+          timeUtc: atTomorrow(7, 0),
+          rangeEndUtc: null,
+          prep: "Start the day",
+        },
+      ];
+    }
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
     const dayParts = getZonedParts(lastReal.ts, timeZone);
     const dayStartUtc = getUtcMsFromZoned(
@@ -503,7 +486,7 @@ export default function App() {
       { type: "MilkGiven" as const, label: "Bottle feed", offsetMin: 540 },
       { type: "SolidsGiven" as const, label: "Solids", offsetMin: 630 },
       { type: "MilkGiven" as const, label: "Bottle feed", offsetMin: 690 },
-      { type: "Asleep" as const, label: "Asleep", offsetMin: 705 },
+      { type: "Asleep" as const, label: "Bedtime", offsetMin: 705 },
     ];
 
     const lastBaselineIndex = baseline
@@ -551,25 +534,35 @@ export default function App() {
 
     return upcoming;
   };
+  const lastRealLog =
+    [...state.eventLog]
+      .filter((event) => !event.autoPredicted && event.type !== "RoutineStarted")
+      .map((event) => ({ event, ts: Date.parse(event.timestampUtc) }))
+      .filter((item) => !Number.isNaN(item.ts) && item.ts <= nowUtcMs)
+      .pop() ?? null;
+  const loggedAsleep = lastRealLog?.event.type === "Asleep";
   const predictedEvents = buildPredictedEvents();
   const upcomingEvents = predictedEvents.filter(
     (predicted) => !isEventSatisfied(predicted, state.eventLog)
   );
-  const timelineItems = upcomingEvents.map((item) => ({
+  const timelineItems: Array<PredictedEvent & { effectiveTimeUtc: number }> = upcomingEvents.map((item) => ({
     ...item,
     effectiveTimeUtc: item.timeUtc,
   }));
   const nextThreeTimeline = timelineItems;
   const upNext = upcomingEvents[0] ?? null;
-  const upNextType: EventType | null = upNext
-    ? upNext.type === "milk"
+  const resolverSnapshot = deriveCurrentState();
+  const resolvedAction = resolveNextAction(resolverSnapshot);
+  const resolvedUpNextType: EventType | null = resolvedAction
+    ? resolvedAction.type === "milk"
       ? "MilkGiven"
-      : upNext.type === "solids"
+      : resolvedAction.type === "solids"
       ? "SolidsGiven"
-      : upNext.type === "nap"
+      : resolvedAction.type === "nap"
       ? "NapStarted"
       : "Asleep"
     : null;
+  const upNextType = outputs.isAsleep ? "FirstAwake" : resolvedUpNextType;
   const orderedEvents = (() => {
     const base = [...EVENT_TYPES];
     if (!canLog.FirstAwake) {
@@ -577,6 +570,13 @@ export default function App() {
       if (firstAwakeIndex > -1) {
         const [item] = base.splice(firstAwakeIndex, 1);
         base.push(item);
+      }
+    }
+    if (loggedAsleep) {
+      const firstAwakeIndex = base.findIndex((event) => event.type === "FirstAwake");
+      if (firstAwakeIndex > -1) {
+        const [item] = base.splice(firstAwakeIndex, 1);
+        base.unshift(item);
       }
     }
     if (upNextType) {
@@ -608,47 +608,6 @@ export default function App() {
     });
     return groups;
   })();
-  const lastRoutineStartUtc =
-    [...state.eventLog]
-      .filter((event) => event.type === "RoutineStarted")
-      .map((event) => Date.parse(event.timestampUtc))
-      .pop() ?? null;
-  const lastSolidsUtc =
-    [...state.eventLog]
-      .filter((event) => event.type === "SolidsGiven")
-      .map((event) => Date.parse(event.timestampUtc))
-      .pop() ?? null;
-  const softStops = [
-    {
-      label: "Play time",
-      timeUtc: state.lastWakeTime ? state.lastWakeTime + 20 * MS_MIN : null,
-    },
-    {
-      label: "Snack",
-      timeUtc: lastSolidsUtc ? lastSolidsUtc + 150 * MS_MIN : null,
-    },
-    {
-      label: "Routine reset",
-      timeUtc: lastRoutineStartUtc ? lastRoutineStartUtc + 45 * MS_MIN : null,
-    },
-  ].filter((item) => item.timeUtc !== null) as { label: string; timeUtc: number }[];
-  const customSoftStopsCalculated = customSoftStops
-    .map((item) => {
-      const anchorTime =
-        item.anchor === "wake"
-          ? state.lastWakeTime
-          : item.anchor === "solids"
-          ? lastSolidsUtc
-          : lastRoutineStartUtc;
-      return {
-        label: item.label,
-        timeUtc: anchorTime ? anchorTime + item.offsetMin * MS_MIN : null,
-      };
-    })
-    .filter((item) => item.timeUtc !== null) as { label: string; timeUtc: number }[];
-  const allSoftStops = [...softStops, ...customSoftStopsCalculated].sort(
-    (a, b) => a.timeUtc - b.timeUtc
-  );
 
   const currentStatus = outputs.isAsleep
     ? "Sleeping"
@@ -659,6 +618,23 @@ export default function App() {
     : state.lastWakeTime && nowUtcMs - state.lastWakeTime < 30 * MS_MIN
     ? "Getting ready"
     : "Playtime";
+  const routineDurations = (() => {
+    const events = [...state.eventLog]
+      .map((event) => ({ event, ts: Date.parse(event.timestampUtc) }))
+      .filter((item) => !Number.isNaN(item.ts))
+      .sort((a, b) => a.ts - b.ts);
+    const durations: number[] = [];
+    events.forEach((entry, index) => {
+      if (entry.event.type !== "RoutineStarted") return;
+      const next = events.slice(index + 1).find((item) => item.event.type !== "RoutineStarted");
+      if (!next) return;
+      const minutes = Math.max(0, Math.round((next.ts - entry.ts) / MS_MIN));
+      if (minutes > 0) durations.push(minutes);
+    });
+    return durations;
+  })();
+  const longestRoutine = routineDurations.length ? Math.max(...routineDurations) : null;
+  const shortestRoutine = routineDurations.length ? Math.min(...routineDurations) : null;
 
   useEffect(() => {
     if (selectedUpcomingId && !timelineItems.find((item) => item.id === selectedUpcomingId)) {
@@ -744,29 +720,6 @@ export default function App() {
     });
   };
 
-  const addCustomSoftStop = () => {
-    const trimmed = softStopLabel.trim();
-    if (!trimmed) return;
-    const offsetValue = Number(softStopOffset);
-    if (!Number.isFinite(offsetValue) || offsetValue <= 0) return;
-    const newStop: CustomSoftStop = {
-      id: `soft-stop-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      label: trimmed,
-      anchor: softStopAnchor,
-      offsetMin: offsetValue,
-    };
-    setCustomSoftStops((prev) => [...prev, newStop]);
-    setSoftStopLabel("Play time");
-    setSoftStopAnchor("wake");
-    setSoftStopOffset(20);
-    setSoftStopFormOpen(false);
-    pushToast("Reminder added");
-  };
-
-  const removeCustomSoftStop = (id: string) => {
-    setCustomSoftStops((prev) => prev.filter((stop) => stop.id !== id));
-    pushToast("Reminder removed");
-  };
 
   return (
     <div className="min-h-screen bg-app px-6 pb-16 pt-8 text-ink dark:bg-app-dark dark:text-gh-text md:px-12 md:pt-10 lg:px-16 lg:pt-12">
@@ -1132,6 +1085,31 @@ export default function App() {
         </ul>
       </section>
 
+      <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
+        <h2 className="flex items-center gap-2 font-display text-2xl">
+          <Sparkle className="h-6 w-6 text-accent dark:text-gh-accent" />
+          Routine activity
+        </h2>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-xl bg-white p-5 text-base font-medium dark:bg-gh-surface-2">
+            <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+              Longest routine
+            </div>
+            <div className="mt-2 text-2xl font-semibold text-ink dark:text-gh-text">
+              {longestRoutine !== null ? formatCountdown(longestRoutine) : "—"}
+            </div>
+          </div>
+          <div className="rounded-xl bg-white p-5 text-base font-medium dark:bg-gh-surface-2">
+            <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+              Shortest routine
+            </div>
+            <div className="mt-2 text-2xl font-semibold text-ink dark:text-gh-text">
+              {shortestRoutine !== null ? formatCountdown(shortestRoutine) : "—"}
+            </div>
+          </div>
+        </div>
+      </section>
+
       </div>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-2">
@@ -1215,145 +1193,8 @@ export default function App() {
             </div>
           ) : null}
         </div>
-        <div className="rounded-2xl bg-white p-5 dark:bg-gh-surface-2">
-          <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-            Flexible reminders
-          </div>
-          {outputs.isAsleep || allSoftStops.length === 0 ? (
-            <div className="mt-2 text-sm text-muted dark:text-gh-muted">—</div>
-          ) : (
-            <ul className="mt-3 grid gap-3">
-              {allSoftStops.map((stop) => {
-                const countdown = Math.max(0, Math.ceil((stop.timeUtc - nowUtcMs) / MS_MIN));
-                return (
-                  <li
-                    key={`${stop.label}-${stop.timeUtc}`}
-                    className="rounded-xl border border-panel-strong px-4 py-3 dark:border-gh-border"
-                  >
-                    <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-                      {stop.label}
-                    </div>
-                    <div className="mt-2 flex flex-wrap items-baseline gap-3">
-                      <span className="text-4xl font-semibold text-ink dark:text-gh-text">
-                        {countdown === 0 ? currentStatus : formatCountdown(countdown)}
-                      </span>
-                      <span className="text-sm text-muted dark:text-gh-muted">
-                        at {formatTimeZoned(stop.timeUtc, timeZone)}
-                      </span>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          <div className="mt-4 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-            Don't miss
-          </div>
-          {outputs.isAsleep ? (
-            <div className="mt-2 text-sm text-muted dark:text-gh-muted">—</div>
-          ) : (
-            <>
-              <div className="mt-3 flex flex-wrap items-baseline gap-3">
-                {hardStopCountdown !== null ? (
-                  <span className="text-4xl font-semibold text-ink dark:text-gh-text">
-                    {hardStopCountdown === 0 ? currentStatus : formatCountdown(hardStopCountdown)}
-                  </span>
-                ) : (
-                  <span className="text-2xl font-semibold text-muted dark:text-gh-muted animate-pulse">
-                    Calculating...
-                  </span>
-                )}
-                {outputs.nextHardStopUtc ? (
-                  <span className="text-sm text-muted dark:text-gh-muted">
-                    at {formatTimeZoned(outputs.nextHardStopUtc, timeZone)}
-                  </span>
-                ) : null}
-              </div>
-              {outputs.nextHardStopUtc ? (
-                <div className="mt-3 text-sm text-ink dark:text-gh-text">
-                  After solids → Wind-down for bottle → Nap (estimated{" "}
-                  {formatTimeZoned(outputs.nextHardStopUtc, timeZone)})
-                </div>
-              ) : null}
-            </>
-          )}
-          <div className="mt-4 flex w-full flex-col items-start gap-3">
-            <div className="flex w-full flex-col items-stretch gap-3">
-              {!softStopFormOpen ? (
-                <button
-                  className={`w-full rounded-full bg-accent px-5 py-3 text-sm font-semibold text-white transition-all duration-300 ${EASE_CURVE}`}
-                  type="button"
-                  onClick={() => setSoftStopFormOpen(true)}
-                >
-                  Add reminder
-                </button>
-              ) : (
-                <button
-                  className={`w-full rounded-full border border-panel-strong bg-white px-5 py-3 text-sm font-semibold transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:bg-gh-surface`}
-                  type="button"
-                  onClick={() => setSoftStopFormOpen(false)}
-                >
-                  Cancel
-                </button>
-              )}
-              <button
-                className={`w-full rounded-full border border-panel-strong bg-white px-5 py-3 text-sm font-semibold transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:bg-gh-surface`}
-                type="button"
-                onClick={() => setSoftStopModalOpen(true)}
-              >
-                Edit reminders
-              </button>
-            </div>
-            {softStopFormOpen ? (
-              <div className="w-full max-w-xl rounded-2xl border border-panel-strong bg-white p-4 fade-in dark:border-gh-border dark:bg-gh-surface-2">
-                <div className="grid gap-3 md:grid-cols-3">
-                  <label className="flex flex-col gap-1 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-                    Label
-                    <input
-                      className="rounded-full border border-panel-strong bg-white px-4 py-2 text-sm text-ink dark:border-gh-border dark:bg-gh-surface dark:text-gh-text"
-                      value={softStopLabel}
-                      onChange={(eventTarget) => setSoftStopLabel(eventTarget.target.value)}
-                      placeholder="Play time"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-                    Anchor
-                    <select
-                      className="rounded-full border border-panel-strong bg-white px-4 py-2 text-sm dark:border-gh-border dark:bg-gh-surface"
-                      value={softStopAnchor}
-                      onChange={(eventTarget) =>
-                        setSoftStopAnchor(eventTarget.target.value as SoftStopAnchor)
-                      }
-                    >
-                      <option value="wake">After wake</option>
-                      <option value="solids">After solids</option>
-                      <option value="routine">After routine</option>
-                    </select>
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-                    Offset (min)
-                    <input
-                      type="number"
-                      min={5}
-                      step={5}
-                      className="rounded-full border border-panel-strong bg-white px-4 py-2 text-sm text-ink dark:border-gh-border dark:bg-gh-surface dark:text-gh-text"
-                      value={softStopOffset}
-                      onChange={(eventTarget) => setSoftStopOffset(Number(eventTarget.target.value))}
-                    />
-                  </label>
-                </div>
-                <div className="mt-3 flex items-center gap-2">
-                  <button
-                    className={`rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-white transition-all duration-300 ${EASE_CURVE}`}
-                    type="button"
-                    onClick={addCustomSoftStop}
-                  >
-                    Save
-                  </button>
-                </div>
-              </div>
-            ) : null}
-          </div>
+        <div className="rounded-2xl bg-white p-5 text-sm text-muted dark:bg-gh-surface-2 dark:text-gh-muted">
+          —
         </div>
       </div>
         <div className="mt-4 flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted dark:text-gh-muted">
@@ -1617,59 +1458,6 @@ export default function App() {
         </div>
       ) : null}
 
-      {softStopModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-6">
-          <button
-            className="absolute inset-0 bg-black/40"
-            type="button"
-            aria-label="Close soft stop manager"
-            onClick={() => setSoftStopModalOpen(false)}
-          />
-          <div className="relative w-full max-w-2xl rounded-2xl border border-panel-strong bg-white p-6 shadow-panel dark:border-gh-border dark:bg-gh-surface dark:shadow-panel-dark">
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="text-xl font-semibold text-ink dark:text-gh-text">Reminders</h3>
-              <button
-                className="flex h-10 w-10 items-center justify-center rounded-full border border-panel-strong text-muted dark:border-gh-border dark:text-gh-muted"
-                type="button"
-                aria-label="Close"
-                onClick={() => setSoftStopModalOpen(false)}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            {customSoftStops.length === 0 ? (
-              <div className="mt-4 text-sm text-muted dark:text-gh-muted">No reminders yet.</div>
-            ) : (
-              <div className="mt-4 flex max-h-[60vh] flex-col gap-3 overflow-y-auto pr-2">
-                {customSoftStops.map((stop) => (
-                  <div
-                    key={stop.id}
-                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-panel-strong px-4 py-3 text-sm dark:border-gh-border"
-                  >
-                    <div className="text-ink dark:text-gh-text">
-                      {stop.label} ·{" "}
-                      {stop.anchor === "wake"
-                        ? "After wake"
-                        : stop.anchor === "solids"
-                        ? "After solids"
-                        : "After routine"}{" "}
-                      + {stop.offsetMin} min
-                    </div>
-                    <button
-                      className={`flex h-10 w-10 items-center justify-center rounded-full border border-panel-strong text-muted transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:text-gh-muted`}
-                      type="button"
-                      onClick={() => removeCustomSoftStop(stop.id)}
-                      aria-label="Remove soft stop"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      ) : null}
 
       {wakeInfoOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-6">
