@@ -271,8 +271,15 @@ const normalizeEventLog = (
     (event) => !(event.type === "FirstAwake" && event.autoPredicted && hasFirstAwake)
   );
   const hasAnyFirstAwake = cleaned.some((event) => event.type === "FirstAwake");
+  const lastReal = [...cleaned]
+    .filter((event) => !event.autoPredicted)
+    .map((event) => ({ event, ts: Date.parse(event.timestampUtc) }))
+    .filter((item) => !Number.isNaN(item.ts) && item.ts <= now)
+    .pop();
+  const isDayClosed = lastReal?.event.type === "Asleep";
   const withFirstAwake = (() => {
     if (hasAnyFirstAwake) return cleaned;
+    if (isDayClosed) return cleaned;
     const predictedTime = getDayStartUtc(now);
     const predicted: CareEvent = {
       id: `auto-first-awake-${predictedTime}`,
@@ -290,6 +297,11 @@ const normalizeEventLog = (
     ? Math.max(...realEvents.map((event) => Date.parse(event.timestampUtc)))
     : null;
   if (lastRealTimestamp === null || Number.isNaN(lastRealTimestamp)) {
+    return withFirstAwake.sort(
+      (a, b) => Date.parse(a.timestampUtc) - Date.parse(b.timestampUtc)
+    );
+  }
+  if (isDayClosed) {
     return withFirstAwake.sort(
       (a, b) => Date.parse(a.timestampUtc) - Date.parse(b.timestampUtc)
     );

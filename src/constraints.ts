@@ -301,7 +301,7 @@ export const computeOutputs = (
   if (currentlyAsleep) {
     const asleepStartUtc = isNightSleep ? lastAsleepUtc : state.lastNapStart;
     const asleepMin = asleepStartUtc ? minutesFromMs(now - asleepStartUtc) : 0;
-    summary.push(`Asleep for ${asleepMin} min`);
+    summary.push(`Bedtime for ${asleepMin} min`);
     if (!isNightSleep) {
       if (expectedWakeUtc) {
         summary.push(`Expected wake ${formatTime(expectedWakeUtc, timeZone)}`);
