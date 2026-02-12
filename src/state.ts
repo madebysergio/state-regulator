@@ -76,6 +76,17 @@ export const recomputeCoreState = (events: CareEvent[], now: number): CoreState 
         break;
       case "MilkGiven":
       case "SolidsGiven":
+        if (
+          nextState.lastNapStart !== null &&
+          (nextState.lastNapEnd === null || nextState.lastNapEnd < nextState.lastNapStart) &&
+          timestamp >= nextState.lastNapStart
+        ) {
+          nextState.lastNapEnd = timestamp;
+          const duration = Math.max(0, timestamp - nextState.lastNapStart);
+          nextState.lastNapDuration = duration;
+          totalDaySleep += duration;
+          nextState.lastWakeTime = timestamp;
+        }
         nextState.lastFeedTime = timestamp;
         break;
       case "Asleep":
@@ -202,45 +213,46 @@ const buildBaselineEvents = (
   horizonUtc: number
 ): CareEvent[] => {
   const events: CareEvent[] = [];
-  let wakeStart = firstWakeUtc;
-  let cycle = 0;
-  const maxCycles = 8;
-  while (wakeStart < horizonUtc && cycle < maxCycles) {
-    const feedTime = wakeStart + defaultConfig.feedIntervalMinMin * MS_MIN;
-    if (feedTime <= horizonUtc) {
-      events.push({
-        id: `auto-feed-${feedTime}`,
-        type: "MilkGiven",
-        timestampUtc: new Date(feedTime).toISOString(),
-        autoPredicted: true,
-      });
-    }
+  const timeZone = resolveTimeZone();
+  const dayParts = getZonedParts(firstWakeUtc, timeZone);
+  const atTime = (hour: number, minute: number) =>
+    getUtcMsFromZoned(
+      {
+        year: dayParts.year,
+        month: dayParts.month,
+        day: dayParts.day,
+        hour,
+        minute,
+      },
+      timeZone
+    );
 
-    const napStart = wakeStart + defaultConfig.minWakeWindowMin * MS_MIN;
-    if (napStart <= horizonUtc) {
-      events.push({
-        id: `auto-nap-start-${napStart}`,
-        type: "NapStarted",
-        timestampUtc: new Date(napStart).toISOString(),
-        autoPredicted: true,
-      });
-      const napEnd = napStart + defaultConfig.expectedNapDurationMin * MS_MIN;
-      if (napEnd <= horizonUtc) {
-        events.push({
-          id: `auto-nap-end-${napEnd}`,
-          type: "NapEnded",
-          timestampUtc: new Date(napEnd).toISOString(),
-          autoPredicted: true,
-        });
-        wakeStart = napEnd;
-      } else {
-        break;
-      }
-    } else {
-      break;
-    }
-    cycle += 1;
-  }
+  const baseline = [
+    { type: "FirstAwake" as const, time: atTime(7, 0) },
+    { type: "MilkGiven" as const, time: atTime(7, 0) },
+    { type: "SolidsGiven" as const, time: atTime(8, 0) },
+    { type: "NapStarted" as const, time: atTime(10, 0) },
+    { type: "NapEnded" as const, time: atTime(11, 15) },
+    { type: "SolidsGiven" as const, time: atTime(12, 0) },
+    { type: "MilkGiven" as const, time: atTime(12, 0) },
+    { type: "NapStarted" as const, time: atTime(14, 30) },
+    { type: "NapEnded" as const, time: atTime(16, 0) },
+    { type: "MilkGiven" as const, time: atTime(16, 0) },
+    { type: "SolidsGiven" as const, time: atTime(17, 30) },
+    { type: "MilkGiven" as const, time: atTime(18, 30) },
+    { type: "Asleep" as const, time: atTime(19, 0) },
+  ];
+
+  baseline.forEach((entry) => {
+    if (entry.time > horizonUtc) return;
+    events.push({
+      id: `auto-${entry.type}-${entry.time}`,
+      type: entry.type,
+      timestampUtc: new Date(entry.time).toISOString(),
+      autoPredicted: true,
+    });
+  });
+
   return events;
 };
 
@@ -274,10 +286,15 @@ const normalizeEventLog = (
   const realEvents = withFirstAwake.filter(
     (event) => !event.autoPredicted && isCoreEvent(event)
   );
-  const lastThreeReal = realEvents.slice(-3);
-  const horizonUtc = lastThreeReal.length
-    ? Math.max(...lastThreeReal.map((event) => Date.parse(event.timestampUtc)))
-    : now;
+  const lastRealTimestamp = realEvents.length
+    ? Math.max(...realEvents.map((event) => Date.parse(event.timestampUtc)))
+    : null;
+  if (lastRealTimestamp === null || Number.isNaN(lastRealTimestamp)) {
+    return withFirstAwake.sort(
+      (a, b) => Date.parse(a.timestampUtc) - Date.parse(b.timestampUtc)
+    );
+  }
+  const horizonUtc = lastRealTimestamp;
   const firstWake = withFirstAwake.find((event) => event.type === "FirstAwake");
   if (!firstWake) {
     return withFirstAwake.sort(
@@ -296,6 +313,7 @@ const normalizeEventLog = (
   baselineEvents.forEach((candidate) => {
     const candidateTime = Date.parse(candidate.timestampUtc);
     if (Number.isNaN(candidateTime)) return;
+    if (candidateTime > lastRealTimestamp) return;
     if (isSuppressedAuto(suppressed, candidate.type, candidateTime)) return;
     if (hasMatchingEvent(merged, candidate.type, candidateTime)) return;
     merged.push(candidate);

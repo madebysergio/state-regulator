@@ -318,10 +318,7 @@ export default function App() {
   }, [state.eventLog]);
 
 
-  const outputs = useMemo(
-    () => computeOutputs(state, nowUtcMs, timeZone, defaultConfig),
-    [state, nowUtcMs, timeZone]
-  );
+  const outputs = computeOutputs(state, nowUtcMs, timeZone, defaultConfig);
   const wakePct =
     outputs.pressureIndicator.wakeUtilization === null
       ? null
@@ -379,19 +376,200 @@ export default function App() {
     NapEnded: true,
     Asleep: true,
   };
-  const nextExpectedEvent: EventType | null =
-    state.lastWakeTime === null
-      ? "FirstAwake"
-      : napInProgress
-      ? "NapEnded"
-      : outputs.isAsleep && isNightSleep
-      ? null
-      : wakeRemaining !== null && wakeRemaining <= 30
-      ? "RoutineStarted"
-      : outputs.isAsleep
-      ? null
-      : "NapStarted";
 
+  const feedWindowStartUtc = state.lastFeedTime && !outputs.isAsleep
+    ? state.lastFeedTime + defaultConfig.feedIntervalMinMin * MS_MIN
+    : null;
+  const feedWindowEndUtc = state.lastFeedTime && !outputs.isAsleep
+    ? state.lastFeedTime + defaultConfig.feedIntervalMaxMin * MS_MIN
+    : null;
+  type PredictedType = "milk" | "solids" | "nap" | "bedtime";
+  type PredictedEvent = {
+    id: string;
+    type: PredictedType;
+    label: string;
+    timeUtc: number;
+    rangeEndUtc?: number | null;
+    prep: string;
+  };
+  const TOLERANCE_WINDOW_MIN = 20;
+  const FINAL_WAKE_THRESHOLD_MIN = 240;
+
+  const getLastEvent = (type: EventType) =>
+    [...state.eventLog]
+      .filter((event) => event.type === type)
+      .map((event) => Date.parse(event.timestampUtc))
+      .filter((timestamp) => !Number.isNaN(timestamp) && timestamp <= nowUtcMs)
+      .pop() ?? null;
+
+  const deriveCurrentState = () => {
+    const hungerPressure = state.timeSinceLastFeed
+      ? Math.min(1, state.timeSinceLastFeed / (defaultConfig.feedIntervalMaxMin * MS_MIN))
+      : 0;
+    const sleepPressure = state.estimatedSleepPressure;
+    const wakeDuration = state.lastWakeTime
+      ? Math.max(0, (nowUtcMs - state.lastWakeTime) / MS_MIN)
+      : 0;
+    const lastSolids = getLastEvent("SolidsGiven");
+    const lastMilk = getLastEvent("MilkGiven");
+    const lastNap = getLastEvent("NapEnded") ?? getLastEvent("NapStarted");
+    const dayClosed =
+      Boolean(lastSolids) &&
+      Boolean(lastMilk) &&
+      wakeDuration > FINAL_WAKE_THRESHOLD_MIN;
+    return {
+      hungerPressure,
+      sleepPressure,
+      wakeDuration,
+      lastSolids,
+      lastMilk,
+      lastNap,
+      dayClosed,
+    };
+  };
+
+  const isEventSatisfied = (predicted: PredictedEvent, logged: typeof state.eventLog) => {
+    const tolerance = TOLERANCE_WINDOW_MIN * MS_MIN;
+    const matchType = (type: PredictedType): EventType =>
+      type === "milk"
+        ? "MilkGiven"
+        : type === "solids"
+        ? "SolidsGiven"
+        : type === "nap"
+        ? "NapStarted"
+        : "Asleep";
+    const targetType = matchType(predicted.type);
+    return logged.some((event) => {
+      if (event.type !== targetType) return false;
+      const delta = Math.abs(Date.parse(event.timestampUtc) - predicted.timeUtc);
+      return delta < tolerance;
+    });
+  };
+
+  const resolveNextAction = (snapshot: ReturnType<typeof deriveCurrentState>) => {
+    if (snapshot.dayClosed) return { type: "bedtime" as const };
+    if (snapshot.hungerPressure > snapshot.sleepPressure) {
+      if (!snapshot.lastSolids) return { type: "solids" as const };
+      if (!snapshot.lastMilk) return { type: "milk" as const };
+      return { type: "milk" as const };
+    }
+    if (snapshot.sleepPressure > snapshot.hungerPressure) {
+      return { type: "nap" as const };
+    }
+    return null;
+  };
+
+  const resolveSecondaryAction = (
+    snapshot: ReturnType<typeof deriveCurrentState>,
+    next: { type: PredictedType } | null
+  ) => {
+    if (!next) return null;
+    if (next.type === "milk" && !snapshot.lastSolids) return { type: "solids" as const };
+    if (next.type === "nap" && snapshot.hungerPressure > 0.7) return { type: "milk" as const };
+    return null;
+  };
+
+  const buildPredictedEvents = () => {
+    const realEvents = [...state.eventLog]
+      .filter((event) => !event.autoPredicted)
+      .map((event) => ({ ...event, ts: Date.parse(event.timestampUtc) }))
+      .filter((event) => !Number.isNaN(event.ts) && event.ts <= nowUtcMs);
+    if (realEvents.length === 0) return [];
+
+    const lastReal = realEvents[realEvents.length - 1];
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    const dayParts = getZonedParts(lastReal.ts, timeZone);
+    const dayStartUtc = getUtcMsFromZoned(
+      {
+        year: dayParts.year,
+        month: dayParts.month,
+        day: dayParts.day,
+        hour: 7,
+        minute: 0,
+      },
+      timeZone
+    );
+
+    const baseline = [
+      { type: "FirstAwake" as const, label: "First awake", offsetMin: 0 },
+      { type: "MilkGiven" as const, label: "Bottle feed", offsetMin: 10 },
+      { type: "SolidsGiven" as const, label: "Solids", offsetMin: 45 },
+      { type: "NapStarted" as const, label: "Nap window", offsetMin: 165, rangeEndOffsetMin: 255 },
+      { type: "NapEnded" as const, label: "Nap ended", offsetMin: 255 },
+      { type: "MilkGiven" as const, label: "Bottle feed", offsetMin: 270 },
+      { type: "SolidsGiven" as const, label: "Solids", offsetMin: 300 },
+      { type: "NapStarted" as const, label: "Nap window", offsetMin: 450, rangeEndOffsetMin: 540 },
+      { type: "NapEnded" as const, label: "Nap ended", offsetMin: 540 },
+      { type: "MilkGiven" as const, label: "Bottle feed", offsetMin: 540 },
+      { type: "SolidsGiven" as const, label: "Solids", offsetMin: 630 },
+      { type: "MilkGiven" as const, label: "Bottle feed", offsetMin: 690 },
+      { type: "Asleep" as const, label: "Asleep", offsetMin: 705 },
+    ];
+
+    const lastBaselineIndex = baseline
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => entry.type === lastReal.type)
+      .pop();
+    if (!lastBaselineIndex) return [];
+    const baseTime = dayStartUtc + lastBaselineIndex.entry.offsetMin * MS_MIN;
+    const delta = lastReal.ts - baseTime;
+
+    const upcoming: PredictedEvent[] = baseline
+      .slice(lastBaselineIndex.index + 1)
+      .map((entry, index) => {
+        const timeUtc = dayStartUtc + entry.offsetMin * MS_MIN + delta;
+        const rangeEndUtc = entry.rangeEndOffsetMin
+          ? dayStartUtc + entry.rangeEndOffsetMin * MS_MIN + delta
+          : null;
+        const type: PredictedType =
+          entry.type === "MilkGiven"
+            ? "milk"
+            : entry.type === "SolidsGiven"
+            ? "solids"
+            : entry.type === "NapStarted"
+            ? "nap"
+            : "bedtime";
+        return {
+          id: `pred-${entry.type}-${index}-${timeUtc}`,
+          type,
+          label: entry.label,
+          timeUtc,
+          rangeEndUtc,
+          prep:
+            entry.type === "MilkGiven"
+              ? "Prep feeding supplies"
+              : entry.type === "SolidsGiven"
+              ? "Prep solids"
+              : entry.type === "NapStarted"
+              ? "Prepare sleep space"
+              : entry.type === "NapEnded"
+              ? "Wake window resets"
+              : "Bedtime",
+        };
+      })
+      .filter((entry) => entry.timeUtc >= lastReal.ts);
+
+    return upcoming;
+  };
+  const predictedEvents = buildPredictedEvents();
+  const upcomingEvents = predictedEvents.filter(
+    (predicted) => !isEventSatisfied(predicted, state.eventLog)
+  );
+  const timelineItems = upcomingEvents.map((item) => ({
+    ...item,
+    effectiveTimeUtc: item.timeUtc,
+  }));
+  const nextThreeTimeline = timelineItems;
+  const upNext = upcomingEvents[0] ?? null;
+  const upNextType: EventType | null = upNext
+    ? upNext.type === "milk"
+      ? "MilkGiven"
+      : upNext.type === "solids"
+      ? "SolidsGiven"
+      : upNext.type === "nap"
+      ? "NapStarted"
+      : "Asleep"
+    : null;
   const orderedEvents = (() => {
     const base = [...EVENT_TYPES];
     if (!canLog.FirstAwake) {
@@ -401,8 +579,8 @@ export default function App() {
         base.push(item);
       }
     }
-    if (nextExpectedEvent) {
-      const nextIndex = base.findIndex((event) => event.type === nextExpectedEvent);
+    if (upNextType) {
+      const nextIndex = base.findIndex((event) => event.type === upNextType);
       if (nextIndex > -1) {
         const [item] = base.splice(nextIndex, 1);
         base.unshift(item);
@@ -410,184 +588,12 @@ export default function App() {
     }
     return base;
   })();
-
-  const feedWindowStartUtc = state.lastFeedTime && !outputs.isAsleep
-    ? state.lastFeedTime + defaultConfig.feedIntervalMinMin * MS_MIN
-    : null;
-  const feedWindowEndUtc = state.lastFeedTime && !outputs.isAsleep
-    ? state.lastFeedTime + defaultConfig.feedIntervalMaxMin * MS_MIN
-    : null;
-  const morningFeedWindowStartUtc =
-    outputs.isAsleep && outputs.expectedWakeUtc ? outputs.expectedWakeUtc : null;
-  const morningFeedWindowEndUtc =
-    outputs.isAsleep && outputs.expectedWakeUtc
-      ? outputs.expectedWakeUtc + 45 * MS_MIN
-      : null;
-
-  const meaningfulEventTypes = new Set<EventType>([
-    "FirstAwake",
-    "NapStarted",
-    "NapEnded",
-    "MilkGiven",
-    "SolidsGiven",
-    "Asleep",
-  ]);
-  const lastMeaningfulUtc =
-    [...state.eventLog]
-      .filter((event) => meaningfulEventTypes.has(event.type))
-      .map((event) => Date.parse(event.timestampUtc))
-      .filter((timestamp) => !Number.isNaN(timestamp) && timestamp <= nowUtcMs)
-      .pop() ?? null;
-  const baselineUtc = lastMeaningfulUtc ?? nowUtcMs;
-  const upcomingCandidates = [
-    outputs.expectedWakeUtc
-      ? {
-          id: "expected-wake",
-          label: "Expected wake",
-          timeUtc: outputs.expectedWakeUtc,
-          prep: "Reset environment for wake window",
-        }
-      : null,
-    outputs.nextWindowStartUtc
-      ? {
-          id: "nap-window",
-          label: "Nap window",
-          timeUtc: outputs.nextWindowStartUtc,
-          rangeEndUtc: outputs.nextWindowEndUtc,
-          prep: "Prepare sleep space",
-        }
-      : null,
-    outputs.nextHardStopUtc
-      ? {
-          id: "routine-latest",
-          label: "Routine latest",
-          timeUtc: outputs.nextHardStopUtc,
-          prep: "Wind-down, reduce stimulation",
-        }
-      : null,
-    feedWindowStartUtc && feedWindowEndUtc
-      ? {
-          id: "next-feed",
-          label: "Feed window",
-          timeUtc: feedWindowStartUtc,
-          rangeEndUtc: feedWindowEndUtc,
-          prep: "Prep feeding supplies",
-        }
-      : null,
-    morningFeedWindowStartUtc && morningFeedWindowEndUtc
-      ? {
-          id: "morning-feed",
-          label: "Morning feed",
-          timeUtc: morningFeedWindowStartUtc,
-          rangeEndUtc: morningFeedWindowEndUtc,
-          prep: "Warm bottle, prep solids",
-        }
-      : null,
-  ].filter(Boolean) as {
-    id: string;
-    label: string;
-    timeUtc: number;
-    rangeEndUtc?: number | null;
-    prep: string;
-  }[];
-  const dayParts = getZonedParts(nowUtcMs, timeZone);
-  const dayEndUtc = getUtcMsFromZoned(
-    { year: dayParts.year, month: dayParts.month, day: dayParts.day, hour: 23, minute: 59 },
-    timeZone
-  );
-  const bedtimeLatestUtc = getUtcMsFromZoned(
-    {
-      year: dayParts.year,
-      month: dayParts.month,
-      day: dayParts.day,
-      hour: defaultConfig.bedtimeLatestHour,
-      minute: defaultConfig.bedtimeLatestMinute,
-    },
-    timeZone
-  );
-  const buildDayUpcoming = () => {
-    const items: {
-      id: string;
-      label: string;
-      timeUtc: number;
-      rangeEndUtc?: number | null;
-      prep: string;
-    }[] = [];
-    const startWake =
-      outputs.expectedWakeUtc && outputs.expectedWakeUtc > nowUtcMs
-        ? outputs.expectedWakeUtc
-        : nowUtcMs;
-    let wakeStart = startWake;
-    let cycle = 0;
-    while (wakeStart < dayEndUtc && cycle < 6) {
-      const feedStart = wakeStart + defaultConfig.feedIntervalMinMin * MS_MIN;
-      const feedEnd = wakeStart + defaultConfig.feedIntervalMaxMin * MS_MIN;
-      if (feedStart <= dayEndUtc) {
-        items.push({
-          id: `feed-${cycle}`,
-          label: cycle === 0 && outputs.isAsleep ? "Morning feed" : "Feed window",
-          timeUtc: feedStart,
-          rangeEndUtc: feedEnd,
-          prep: "Prep feeding supplies",
-        });
-      }
-      const napStart = wakeStart + defaultConfig.minWakeWindowMin * MS_MIN;
-      const napEnd = wakeStart + defaultConfig.maxWakeWindowMin * MS_MIN;
-      if (napStart <= dayEndUtc) {
-        items.push({
-          id: `nap-${cycle}`,
-          label: "Nap window",
-          timeUtc: napStart,
-          rangeEndUtc: napEnd,
-          prep: "Prepare sleep space",
-        });
-      }
-      const nextWake = napStart + defaultConfig.expectedNapDurationMin * MS_MIN;
-      wakeStart = nextWake;
-      cycle += 1;
-    }
-    if (bedtimeLatestUtc > nowUtcMs && bedtimeLatestUtc <= dayEndUtc) {
-      items.push({
-        id: "bedtime-latest",
-        label: "Routine latest",
-        timeUtc: bedtimeLatestUtc,
-        prep: "Wind-down, reduce stimulation",
-      });
-    }
-    return items;
-  };
-  const dayUpcoming = buildDayUpcoming();
-
-  const timelineItems = [...upcomingCandidates, ...dayUpcoming]
-    .filter((item) => {
-      const windowEnd = item.rangeEndUtc ?? item.timeUtc;
-      const baseline = Math.max(nowUtcMs, baselineUtc);
-      const horizonEnd =
-        outputs.nextHardStopUtc && outputs.nextHardStopUtc > nowUtcMs
-          ? outputs.nextHardStopUtc
-          : dayEndUtc;
-      const inWindow = baseline <= windowEnd;
-      if (!inWindow) return false;
-      if (item.rangeEndUtc) {
-        return item.timeUtc <= horizonEnd;
-      }
-      return item.timeUtc >= baseline && item.timeUtc <= horizonEnd;
-    })
-    .map((item) => {
-      const baseline = Math.max(nowUtcMs, baselineUtc);
-      const effectiveTimeUtc = item.rangeEndUtc
-        ? Math.max(item.timeUtc, baseline)
-        : item.timeUtc;
-      return { ...item, effectiveTimeUtc };
-    })
-    .sort((a, b) => a.effectiveTimeUtc - b.effectiveTimeUtc);
-  const nextThreeTimeline = timelineItems;
   const sortedEventLog = [...state.eventLog].sort((a, b) =>
     eventLogSort === "latest"
       ? Date.parse(b.timestampUtc) - Date.parse(a.timestampUtc)
       : Date.parse(a.timestampUtc) - Date.parse(b.timestampUtc)
   );
-  const groupedEventLog = useMemo(() => {
+  const groupedEventLog = (() => {
     const groups: { date: string; events: typeof sortedEventLog }[] = [];
     const map = new Map<string, typeof sortedEventLog>();
     sortedEventLog.forEach((event) => {
@@ -601,7 +607,7 @@ export default function App() {
       groups.push({ date, events });
     });
     return groups;
-  }, [sortedEventLog, timeZone]);
+  })();
   const lastRoutineStartUtc =
     [...state.eventLog]
       .filter((event) => event.type === "RoutineStarted")
@@ -660,12 +666,13 @@ export default function App() {
     }
   }, [selectedUpcomingId, timelineItems]);
 
-  useEffect(() => {
-    setUpcomingRowsToShow(1);
-  }, [nextThreeTimeline.length]);
-
   const rowsPerView = isXL ? 3 : 1;
   const maxUpcomingRows = Math.max(1, Math.ceil(nextThreeTimeline.length / rowsPerView));
+
+  useEffect(() => {
+    setUpcomingRowsToShow(Math.min(2, maxUpcomingRows));
+  }, [nextThreeTimeline.length, maxUpcomingRows]);
+
   const visibleUpcoming = nextThreeTimeline.slice(0, upcomingRowsToShow * rowsPerView);
   const canShowMoreUpcoming = upcomingRowsToShow < maxUpcomingRows;
 
@@ -698,7 +705,9 @@ export default function App() {
       const target = prev.eventLog.find((event) => event.id === editId);
       const updatedTimestampUtc = new Date(newTimestampUtc).toISOString();
       const eventLog = prev.eventLog.map((event) =>
-        event.id === editId ? { ...event, timestampUtc: updatedTimestampUtc } : event
+        event.id === editId
+          ? { ...event, timestampUtc: updatedTimestampUtc, autoPredicted: false }
+          : event
       );
       const autoSuppressed = target?.autoPredicted
         ? [
@@ -821,7 +830,7 @@ export default function App() {
                     outputs.pressureIndicator.regulationRisk === "rising" &&
                     (outputs.pressureIndicator.wakeUtilization ?? 0) >= 0.85 &&
                     outputs.windowCategories.allowed.includes("Routine reset");
-                  const isNext = nextExpectedEvent === event.type;
+                  const isNext = upNextType === event.type;
                   return (
                     <button
                       key={event.type}
@@ -894,13 +903,15 @@ export default function App() {
                         <div className="flex items-center gap-3">
                           {EVENT_ICONS[event.type]}
                           <div className="flex flex-col gap-1">
-                            <strong className="text-base">{EVENT_LABELS[event.type]}</strong>
-                            {event.autoPredicted ? (
-                              <small className="text-sm text-muted dark:text-gh-muted">
-                                auto-predicted
-                              </small>
-                            ) : null}
-                            <span className="text-xl font-semibold">
+                            <div className="flex items-center justify-between gap-2">
+                              <strong className="text-[24px]">{EVENT_LABELS[event.type]}</strong>
+                              {event.autoPredicted ? (
+                                <small className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-[9px] uppercase tracking-[0.16em] text-accent dark:border-gh-accent/50 dark:bg-gh-accent/10 dark:text-gh-accent">
+                                  auto-predicted
+                                </small>
+                              ) : null}
+                            </div>
+                            <span className="text-base font-semibold text-accent dark:text-gh-accent">
                               {formatTimeZoned(Date.parse(event.timestampUtc), timeZone)}
                             </span>
                             <small className="text-sm text-muted dark:text-gh-muted">
@@ -1091,6 +1102,11 @@ export default function App() {
               >
                 Collapse
               </button>
+            ) : null}
+            {nextThreeTimeline.some((item) => item.label === "Nap window") ? (
+              <div className="text-xs text-muted dark:text-gh-muted">
+                Extra nap available if needed.
+              </div>
             ) : null}
           </div>
         ) : null}
@@ -1553,13 +1569,15 @@ export default function App() {
                         <div className="flex items-center gap-3">
                           {EVENT_ICONS[event.type]}
                           <div className="flex flex-col gap-1">
-                            <strong className="text-base">{EVENT_LABELS[event.type]}</strong>
-                            {event.autoPredicted ? (
-                              <small className="text-sm text-muted dark:text-gh-muted">
-                                auto-predicted
-                              </small>
-                            ) : null}
-                            <span className="text-xl font-semibold">
+                            <div className="flex items-center justify-between gap-2">
+                              <strong className="text-[24px]">{EVENT_LABELS[event.type]}</strong>
+                              {event.autoPredicted ? (
+                                <small className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-[9px] uppercase tracking-[0.16em] text-accent dark:border-gh-accent/50 dark:bg-gh-accent/10 dark:text-gh-accent">
+                                  auto-predicted
+                                </small>
+                              ) : null}
+                            </div>
+                            <span className="text-base font-semibold text-accent dark:text-gh-accent">
                               {formatTimeZoned(Date.parse(event.timestampUtc), timeZone)}
                             </span>
                             <small className="text-sm text-muted dark:text-gh-muted">
