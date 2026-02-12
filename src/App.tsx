@@ -35,7 +35,7 @@ type PredictedEvent = {
   type: PredictedType;
   label: string;
   timeUtc: number;
-  rangeEndUtc?: number | null;
+  rangeEndUtc: number | null;
   prep: string;
 };
 
@@ -53,6 +53,13 @@ const MS_MIN = 60 * 1000;
 const EASE_CURVE = "ease-[cubic-bezier(0.22,0.61,0.36,1)]";
 
 // Flexible reminders removed.
+
+const makePredictedEvent = (
+  data: Omit<PredictedEvent, "rangeEndUtc"> & { rangeEndUtc?: number | null }
+): PredictedEvent => ({
+  ...data,
+  rangeEndUtc: data.rangeEndUtc ?? null,
+});
 
 const EVENT_LABELS = EVENT_TYPES.reduce<Record<EventType, string>>((acc, event) => {
   acc[event.type] = event.label;
@@ -450,14 +457,13 @@ export default function App() {
           timeZone
         );
       return [
-        {
+        makePredictedEvent({
           id: "tomorrow-wake",
           type: "bedtime" as const,
           label: "Expected wake",
           timeUtc: atTomorrow(7, 0),
-          rangeEndUtc: null,
           prep: "Start the day",
-        },
+        }),
       ];
     }
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -512,7 +518,7 @@ export default function App() {
             : entry.type === "NapStarted"
             ? "nap"
             : "bedtime";
-        return {
+        return makePredictedEvent({
           id: `pred-${entry.type}-${index}-${timeUtc}`,
           type,
           label: entry.label,
@@ -528,7 +534,7 @@ export default function App() {
               : entry.type === "NapEnded"
               ? "Wake window resets"
               : "Bedtime",
-        };
+        });
       })
       .filter((entry) => entry.timeUtc >= lastReal.ts);
 
