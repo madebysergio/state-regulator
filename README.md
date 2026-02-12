@@ -29,3 +29,4 @@ npm run preview
 - Routine logs are tracked for duration stats only and do not affect predictions or state.
 - Auto-predicted logs are labeled and can be edited or deleted.
 - After bedtime, upcoming events show the next morning’s expected wake without creating new logs.
+- Prediction objects use a strict schema to prevent missing fields in the UI.
