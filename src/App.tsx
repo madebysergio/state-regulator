@@ -326,10 +326,6 @@ export default function App() {
     outputs.nextHardStopUtc !== null
       ? Math.max(0, Math.ceil((outputs.nextHardStopUtc - nowUtcMs) / MS_MIN))
       : null;
-  const expectedWakeCountdown =
-    outputs.expectedWakeUtc !== null
-      ? Math.max(0, Math.ceil((outputs.expectedWakeUtc - nowUtcMs) / MS_MIN))
-      : null;
   const napInProgress =
     state.lastNapStart !== null &&
     (state.lastNapEnd === null || state.lastNapEnd < state.lastNapStart);
@@ -361,6 +357,8 @@ export default function App() {
       .map((event) => Date.parse(event.timestampUtc))
       .filter((timestamp) => !Number.isNaN(timestamp) && timestamp <= nowUtcMs)
       .pop() ?? null;
+
+  const lastAsleepUtc = getLastEvent("Asleep");
 
   const deriveCurrentState = () => {
     const hungerPressure = state.timeSinceLastFeed
@@ -548,6 +546,28 @@ export default function App() {
       .pop() ?? null;
   const loggedAsleep = lastRealLog?.event.type === "Asleep";
   const predictedEvents = buildPredictedEvents();
+  const predictedExpectedWakeUtc =
+    outputs.isAsleep
+      ? predictedEvents.find((event) => event.label === "Expected wake")?.timeUtc ?? null
+      : null;
+  const effectiveExpectedWakeUtc =
+    outputs.isAsleep && predictedExpectedWakeUtc ? predictedExpectedWakeUtc : outputs.expectedWakeUtc;
+  const expectedWakeCountdown =
+    effectiveExpectedWakeUtc !== null
+      ? Math.max(0, Math.ceil((effectiveExpectedWakeUtc - nowUtcMs) / MS_MIN))
+      : null;
+  const sleepProgressPct =
+    outputs.isAsleep && effectiveExpectedWakeUtc && lastAsleepUtc
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            Math.round(
+              ((nowUtcMs - lastAsleepUtc) / (effectiveExpectedWakeUtc - lastAsleepUtc)) * 100
+            )
+          )
+        )
+      : null;
   const upcomingEvents = predictedEvents.filter(
     (predicted) => !isEventSatisfied(predicted, state.eventLog)
   );
@@ -1149,14 +1169,14 @@ export default function App() {
                 </span>
               ) : null}
             </div>
-            {outputs.isAsleep && outputs.expectedWakeUtc ? (
+            {outputs.isAsleep && effectiveExpectedWakeUtc ? (
               <div className="mt-2 text-sm text-muted dark:text-gh-muted">
                 {expectedWakeCountdown !== null
                   ? `Expected wake in ${formatCountdown(expectedWakeCountdown)}`
-                  : `Expected wake ${formatTimeZoned(outputs.expectedWakeUtc, timeZone)}`}
+                  : `Expected wake ${formatTimeZoned(effectiveExpectedWakeUtc, timeZone)}`}
               </div>
             ) : null}
-            {outputs.isAsleep && outputs.expectedWakeUtc ? (
+            {outputs.isAsleep && effectiveExpectedWakeUtc ? (
               <div className="mt-1 text-sm text-muted dark:text-gh-muted">
                 Next: Morning feed and the first wake window.
               </div>
@@ -1215,7 +1235,7 @@ export default function App() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 font-display text-2xl">
             <Gauge className="h-6 w-6 text-accent dark:text-gh-accent" />
-            Time until tired
+            Time until wake
           </h2>
           <button
             className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted"
@@ -1238,7 +1258,9 @@ export default function App() {
               } ${wakeRemaining === null && !outputs.isAsleep ? "animate-pulse" : ""}`}
             >
               {outputs.isAsleep
-                ? currentStatus
+                ? expectedWakeCountdown !== null
+                  ? `Wake in ${formatCountdown(expectedWakeCountdown)}`
+                  : "Wake in —"
                 : wakeRemaining !== null
                 ? wakeRemaining === 0 && outputs.pressureIndicator.regulationRisk === "high"
                   ? "Overtired"
@@ -1260,7 +1282,9 @@ export default function App() {
           </div>
           <div className="mt-2 text-sm text-muted dark:text-gh-muted">
             {outputs.isAsleep
-              ? "Sleeping"
+              ? expectedWakeCountdown !== null
+                ? `Expected wake in ${formatCountdown(expectedWakeCountdown)}`
+                : "Expected wake time pending"
               : outputs.pressureIndicator.regulationRisk === "high"
               ? wakeRemaining === 0
                 ? "Overtired window"
@@ -1276,7 +1300,12 @@ export default function App() {
                 <div className="rounded-full bg-warning/40" />
                 <div className="rounded-full bg-suppressed/40" />
               </div>
-              {wakePct !== null ? (
+              {outputs.isAsleep && sleepProgressPct !== null ? (
+                <div
+                  className={`absolute top-1/2 h-8 w-8 -translate-y-1/2 rounded-full border-2 border-white bg-ink transition-all duration-500 ${EASE_CURVE} dark:border-gh-surface dark:bg-gh-text`}
+                  style={{ left: `calc(${sleepProgressPct}% - 16px)` }}
+                />
+              ) : wakePct !== null ? (
                 <div
                   className={`absolute top-1/2 h-8 w-8 -translate-y-1/2 rounded-full border-2 border-white bg-ink transition-all duration-500 ${EASE_CURVE} dark:border-gh-surface dark:bg-gh-text`}
                   style={{ left: `calc(${wakePct}% - 16px)` }}
@@ -1476,7 +1505,7 @@ export default function App() {
           <div className="relative w-full max-w-xl rounded-2xl border border-panel-strong bg-white p-6 shadow-panel dark:border-gh-border dark:bg-gh-surface dark:shadow-panel-dark">
             <div className="flex items-center justify-between gap-3">
               <h3 className="text-xl font-semibold text-ink dark:text-gh-text">
-                Time until tired
+                Time until wake
               </h3>
               <button
                 className="flex h-10 w-10 items-center justify-center rounded-full border border-panel-strong text-muted dark:border-gh-border dark:text-gh-muted"
