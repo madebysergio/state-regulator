@@ -13,6 +13,7 @@ export type CareEvent = {
   id: string;
   type: EventType;
   timestampUtc: string;
+  autoPredicted?: boolean;
 };
 
 export type CoreState = {
@@ -29,6 +30,7 @@ export type CoreState = {
 
 export type AppState = CoreState & {
   eventLog: CareEvent[];
+  autoSuppressed: { type: EventType; timestampUtc: string }[];
 };
 
 export type ConstraintConfig = {

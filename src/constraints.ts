@@ -32,6 +32,14 @@ const minutesFromMs = (ms: number) => Math.round(ms / MS_MIN);
 
 const addMinutes = (time: number, minutes: number) => time + minutes * MS_MIN;
 
+const formatDuration = (totalMin: number) => {
+  const hours = Math.floor(totalMin / 60);
+  const minutes = Math.max(0, totalMin % 60);
+  if (hours <= 0) return `${minutes} min`;
+  if (minutes === 0) return `${hours} hr`;
+  return `${hours} hr ${minutes} min`;
+};
+
 const getZonedParts = (utcMs: number, timeZone: string) => {
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone,
@@ -303,9 +311,9 @@ export const computeOutputs = (
     }
   } else if (state.lastWakeTime) {
     const awakeMin = minutesFromMs(now - state.lastWakeTime);
-    summary.push(`Awake for ${awakeMin} min`);
+    summary.push(`Awake for ${formatDuration(awakeMin)}`);
     if (state.lastNapDuration) {
-      summary.push(`Last slept ${minutesFromMs(state.lastNapDuration)} min`);
+      summary.push(`Last slept ${formatDuration(minutesFromMs(state.lastNapDuration))}`);
     } else {
       summary.push("Last slept —");
     }
@@ -316,7 +324,7 @@ export const computeOutputs = (
 
   if (state.lastFeedTime) {
     const feedMin = minutesFromMs(now - state.lastFeedTime);
-    summary.push(`Last feed ${feedMin} min ago`);
+    summary.push(`Last feed ${formatDuration(feedMin)} ago`);
   } else {
     summary.push("No feed logged yet");
   }
@@ -341,7 +349,7 @@ export const computeOutputs = (
   } else {
     careLabel = "Overtired / overwhelmed";
   }
-  summary[summary.length - 1] = `How baby's doing: ${careLabel}`;
+  summary[summary.length - 1] = careLabel;
 
   return {
     stateSummary: summary,

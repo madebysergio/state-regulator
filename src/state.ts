@@ -1,6 +1,8 @@
 import { AppState, CareEvent, CoreState, EventType, RegulationLevel } from "./types";
+import { defaultConfig } from "./constraints";
 
 const MS_MIN = 60 * 1000;
+const DAY_START_HOUR = 7;
 
 export const initialCoreState: CoreState = {
   lastWakeTime: null,
@@ -17,6 +19,7 @@ export const initialCoreState: CoreState = {
 export const initialAppState: AppState = {
   ...initialCoreState,
   eventLog: [],
+  autoSuppressed: [],
 };
 
 const levelFromSignals = (
@@ -49,6 +52,9 @@ export const recomputeCoreState = (events: CareEvent[], now: number): CoreState 
 
   for (const event of events) {
     const timestamp = Date.parse(event.timestampUtc);
+    if (Number.isNaN(timestamp) || timestamp > now) {
+      continue;
+    }
     switch (event.type) {
       case "FirstAwake":
         nextState.lastWakeTime = timestamp;
@@ -70,6 +76,17 @@ export const recomputeCoreState = (events: CareEvent[], now: number): CoreState 
         break;
       case "MilkGiven":
       case "SolidsGiven":
+        if (
+          nextState.lastNapStart !== null &&
+          (nextState.lastNapEnd === null || nextState.lastNapEnd < nextState.lastNapStart) &&
+          timestamp >= nextState.lastNapStart
+        ) {
+          nextState.lastNapEnd = timestamp;
+          const duration = Math.max(0, timestamp - nextState.lastNapStart);
+          nextState.lastNapDuration = duration;
+          totalDaySleep += duration;
+          nextState.lastWakeTime = timestamp;
+        }
         nextState.lastFeedTime = timestamp;
         break;
       case "Asleep":
@@ -107,6 +124,206 @@ export const recomputeCoreState = (events: CareEvent[], now: number): CoreState 
   return nextState;
 };
 
+const BASELINE_TOLERANCE_MIN = 20;
+const resolveTimeZone = () =>
+  Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
+const getZonedParts = (utcMs: number, timeZone: string) => {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(new Date(utcMs));
+  const lookup = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+  return {
+    year: lookup("year"),
+    month: lookup("month"),
+    day: lookup("day"),
+    hour: lookup("hour"),
+    minute: lookup("minute"),
+  };
+};
+
+const getTimeZoneOffsetMs = (utcMs: number, timeZone: string) => {
+  const parts = getZonedParts(utcMs, timeZone);
+  const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute);
+  return utcMs - asUtc;
+};
+
+const getUtcMsFromZoned = (
+  zoned: { year: number; month: number; day: number; hour: number; minute: number },
+  timeZone: string
+) => {
+  const tentative = Date.UTC(zoned.year, zoned.month - 1, zoned.day, zoned.hour, zoned.minute);
+  const offset = getTimeZoneOffsetMs(tentative, timeZone);
+  return tentative + offset;
+};
+
+const getDayStartUtc = (utcNow: number) => {
+  const timeZone = resolveTimeZone();
+  const parts = getZonedParts(utcNow, timeZone);
+  const todayStart = getUtcMsFromZoned(
+    { year: parts.year, month: parts.month, day: parts.day, hour: DAY_START_HOUR, minute: 0 },
+    timeZone
+  );
+  if (todayStart > utcNow) {
+    return todayStart - 24 * 60 * 60 * 1000;
+  }
+  return todayStart;
+};
+
+const hasMatchingEvent = (
+  events: CareEvent[],
+  type: EventType,
+  timestamp: number
+) => {
+  const tolerance = BASELINE_TOLERANCE_MIN * MS_MIN;
+  return events.some((event) => {
+    if (event.type !== type) return false;
+    const eventTime = Date.parse(event.timestampUtc);
+    if (Number.isNaN(eventTime)) return false;
+    return Math.abs(eventTime - timestamp) <= tolerance;
+  });
+};
+
+const isSuppressedAuto = (
+  suppressed: { type: EventType; timestampUtc: string }[],
+  type: EventType,
+  timestamp: number
+) => {
+  const tolerance = BASELINE_TOLERANCE_MIN * MS_MIN;
+  return suppressed.some((entry) => {
+    if (entry.type !== type) return false;
+    const entryTime = Date.parse(entry.timestampUtc);
+    if (Number.isNaN(entryTime)) return false;
+    return Math.abs(entryTime - timestamp) <= tolerance;
+  });
+};
+
+const isCoreEvent = (event: CareEvent) =>
+  event.type !== "RoutineStarted";
+
+const buildBaselineEvents = (
+  firstWakeUtc: number,
+  horizonUtc: number
+): CareEvent[] => {
+  const events: CareEvent[] = [];
+  const timeZone = resolveTimeZone();
+  const dayParts = getZonedParts(firstWakeUtc, timeZone);
+  const atTime = (hour: number, minute: number) =>
+    getUtcMsFromZoned(
+      {
+        year: dayParts.year,
+        month: dayParts.month,
+        day: dayParts.day,
+        hour,
+        minute,
+      },
+      timeZone
+    );
+
+  const baseline = [
+    { type: "FirstAwake" as const, time: atTime(7, 0) },
+    { type: "MilkGiven" as const, time: atTime(7, 0) },
+    { type: "SolidsGiven" as const, time: atTime(8, 0) },
+    { type: "NapStarted" as const, time: atTime(10, 0) },
+    { type: "NapEnded" as const, time: atTime(11, 15) },
+    { type: "SolidsGiven" as const, time: atTime(12, 0) },
+    { type: "MilkGiven" as const, time: atTime(12, 0) },
+    { type: "NapStarted" as const, time: atTime(14, 30) },
+    { type: "NapEnded" as const, time: atTime(16, 0) },
+    { type: "MilkGiven" as const, time: atTime(16, 0) },
+    { type: "SolidsGiven" as const, time: atTime(17, 30) },
+    { type: "MilkGiven" as const, time: atTime(18, 30) },
+    { type: "Asleep" as const, time: atTime(19, 0) },
+  ];
+
+  baseline.forEach((entry) => {
+    if (entry.time > horizonUtc) return;
+    events.push({
+      id: `auto-${entry.type}-${entry.time}`,
+      type: entry.type,
+      timestampUtc: new Date(entry.time).toISOString(),
+      autoPredicted: true,
+    });
+  });
+
+  return events;
+};
+
+const normalizeEventLog = (
+  eventLog: CareEvent[],
+  now: number,
+  suppressed: { type: EventType; timestampUtc: string }[]
+): CareEvent[] => {
+  const ordered = [...eventLog].sort(
+    (a, b) => Date.parse(a.timestampUtc) - Date.parse(b.timestampUtc)
+  );
+  const hasFirstAwake = ordered.some(
+    (event) => event.type === "FirstAwake" && !event.autoPredicted
+  );
+  const cleaned = ordered.filter(
+    (event) => !(event.type === "FirstAwake" && event.autoPredicted && hasFirstAwake)
+  );
+  const hasAnyFirstAwake = cleaned.some((event) => event.type === "FirstAwake");
+  const withFirstAwake = (() => {
+    if (hasAnyFirstAwake) return cleaned;
+    const predictedTime = getDayStartUtc(now);
+    const predicted: CareEvent = {
+      id: `auto-first-awake-${predictedTime}`,
+      type: "FirstAwake",
+      timestampUtc: new Date(predictedTime).toISOString(),
+      autoPredicted: true,
+    };
+    return [...cleaned, predicted];
+  })();
+
+  const realEvents = withFirstAwake.filter(
+    (event) => !event.autoPredicted && isCoreEvent(event)
+  );
+  const lastRealTimestamp = realEvents.length
+    ? Math.max(...realEvents.map((event) => Date.parse(event.timestampUtc)))
+    : null;
+  if (lastRealTimestamp === null || Number.isNaN(lastRealTimestamp)) {
+    return withFirstAwake.sort(
+      (a, b) => Date.parse(a.timestampUtc) - Date.parse(b.timestampUtc)
+    );
+  }
+  const horizonUtc = lastRealTimestamp;
+  const firstWake = withFirstAwake.find((event) => event.type === "FirstAwake");
+  if (!firstWake) {
+    return withFirstAwake.sort(
+      (a, b) => Date.parse(a.timestampUtc) - Date.parse(b.timestampUtc)
+    );
+  }
+  const firstWakeUtc = Date.parse(firstWake.timestampUtc);
+  if (Number.isNaN(firstWakeUtc)) {
+    return withFirstAwake.sort(
+      (a, b) => Date.parse(a.timestampUtc) - Date.parse(b.timestampUtc)
+    );
+  }
+
+  const baselineEvents = buildBaselineEvents(firstWakeUtc, horizonUtc);
+  const merged = [...withFirstAwake];
+  baselineEvents.forEach((candidate) => {
+    const candidateTime = Date.parse(candidate.timestampUtc);
+    if (Number.isNaN(candidateTime)) return;
+    if (candidateTime > lastRealTimestamp) return;
+    if (isSuppressedAuto(suppressed, candidate.type, candidateTime)) return;
+    if (hasMatchingEvent(merged, candidate.type, candidateTime)) return;
+    merged.push(candidate);
+  });
+
+  return merged.sort(
+    (a, b) => Date.parse(a.timestampUtc) - Date.parse(b.timestampUtc)
+  );
+};
+
 export const buildEvent = (type: EventType, timestamp: number): CareEvent => ({
   id: `${type}-${timestamp}-${Math.random().toString(16).slice(2)}`,
   type,
@@ -114,14 +331,17 @@ export const buildEvent = (type: EventType, timestamp: number): CareEvent => ({
 });
 
 export const applyEvent = (state: AppState, event: CareEvent, now: number): AppState => {
-  const eventLog = [...state.eventLog, event].sort(
-    (a, b) => Date.parse(a.timestampUtc) - Date.parse(b.timestampUtc)
-  );
+  const eventLog = normalizeEventLog([...state.eventLog, event], now, state.autoSuppressed);
   const core = recomputeCoreState(eventLog, now);
-  return { ...core, eventLog };
+  return { ...core, eventLog, autoSuppressed: state.autoSuppressed };
 };
 
-export const rebuildFromLog = (eventLog: CareEvent[], now: number): AppState => {
-  const core = recomputeCoreState(eventLog, now);
-  return { ...core, eventLog };
+export const rebuildFromLog = (
+  eventLog: CareEvent[],
+  now: number,
+  autoSuppressed: { type: EventType; timestampUtc: string }[] = []
+): AppState => {
+  const normalized = normalizeEventLog(eventLog, now, autoSuppressed);
+  const core = recomputeCoreState(normalized, now);
+  return { ...core, eventLog: normalized, autoSuppressed };
 };
