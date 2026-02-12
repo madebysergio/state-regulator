@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/constraints.ts","./src/main.tsx","./src/state.ts","./src/storage.ts","./src/types.ts"],"errors":true,"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/constraints.ts","./src/main.tsx","./src/state.ts","./src/storage.ts","./src/types.ts"],"version":"5.9.3"}

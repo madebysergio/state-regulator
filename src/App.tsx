@@ -422,7 +422,7 @@ export default function App() {
     return null;
   };
 
-  const buildPredictedEvents = () => {
+  const buildPredictedEvents = (): PredictedEvent[] => {
     const realEvents = [...state.eventLog]
       .filter((event) => !event.autoPredicted && event.type !== "RoutineStarted")
       .map((event) => ({ ...event, ts: Date.parse(event.timestampUtc) }))
@@ -452,9 +452,10 @@ export default function App() {
       return [
         {
           id: "tomorrow-wake",
-          type: "bedtime",
+          type: "bedtime" as const,
           label: "Expected wake",
           timeUtc: atTomorrow(7, 0),
+          rangeEndUtc: null,
           prep: "Start the day",
         },
       ];
@@ -544,7 +545,7 @@ export default function App() {
   const upcomingEvents = predictedEvents.filter(
     (predicted) => !isEventSatisfied(predicted, state.eventLog)
   );
-  const timelineItems = upcomingEvents.map((item) => ({
+  const timelineItems: Array<PredictedEvent & { effectiveTimeUtc: number }> = upcomingEvents.map((item) => ({
     ...item,
     effectiveTimeUtc: item.timeUtc,
   }));
