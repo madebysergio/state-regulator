@@ -87,7 +87,7 @@ const dayBoundUtc = (sourceUtc: number, timeZone: string, hour: number, minute: 
 const formatTime = (utcMs: number, timeZone: string) =>
   new Intl.DateTimeFormat("en-US", {
     timeZone,
-    hour: "2-digit",
+    hour: "numeric",
     minute: "2-digit",
   }).format(new Date(utcMs));
 
