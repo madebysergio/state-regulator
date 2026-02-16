@@ -120,6 +120,17 @@ const formatDateTimeInput = (utcMs: number, timeZone: string) => {
   )}`;
 };
 
+const zonedToUtc = (
+  parts: { year: number; month: number; day: number; hour: number; minute: number },
+  timeZone: string
+) => {
+  const utcGuess = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute);
+  const zoned = getZonedParts(utcGuess, timeZone);
+  const desired = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute);
+  const actual = Date.UTC(zoned.year, zoned.month - 1, zoned.day, zoned.hour, zoned.minute);
+  return utcGuess + (desired - actual);
+};
+
 const formatCountdown = (minutes: number) => {
   if (minutes <= 0) return "0 min";
   if (minutes < 60) return `${minutes} min`;
@@ -286,8 +297,37 @@ export default function App() {
     return () => window.clearTimeout(timeout);
   }, [state.eventLog]);
 
-
-  const outputs = computeOutputs(state, nowUtcMs, timeZone, defaultConfig);
+  const lastAsleepUtc =
+    [...state.eventLog]
+      .filter((event) => event.type === "Asleep")
+      .map((event) => Date.parse(event.timestampUtc))
+      .filter((timestamp) => !Number.isNaN(timestamp) && timestamp <= nowUtcMs)
+      .pop() ?? null;
+  const desiredWakeUtc = (() => {
+    if (!lastAsleepUtc) return null;
+    const bedtimeParts = getZonedParts(lastAsleepUtc, timeZone);
+    const bedtimeMinutes = bedtimeParts.hour * 60 + bedtimeParts.minute;
+    const desiredMinutes = 7 * 60;
+    const dayOffset = bedtimeMinutes >= desiredMinutes ? 1 : 0;
+    return zonedToUtc(
+      {
+        year: bedtimeParts.year,
+        month: bedtimeParts.month,
+        day: bedtimeParts.day + dayOffset,
+        hour: 7,
+        minute: 0,
+      },
+      timeZone
+    );
+  })();
+  const nightSleepDurationMin =
+    lastAsleepUtc && desiredWakeUtc
+      ? Math.max(0, Math.round((desiredWakeUtc - lastAsleepUtc) / MS_MIN))
+      : defaultConfig.nightSleepDurationMin;
+  const outputs = computeOutputs(state, nowUtcMs, timeZone, {
+    ...defaultConfig,
+    nightSleepDurationMin,
+  });
   const wakePct =
     outputs.pressureIndicator.wakeUtilization === null
       ? null
@@ -357,8 +397,6 @@ export default function App() {
       .map((event) => Date.parse(event.timestampUtc))
       .filter((timestamp) => !Number.isNaN(timestamp) && timestamp <= nowUtcMs)
       .pop() ?? null;
-
-  const lastAsleepUtc = getLastEvent("Asleep");
 
   const deriveCurrentState = () => {
     const hungerPressure = state.timeSinceLastFeed
@@ -430,76 +468,117 @@ export default function App() {
   const buildPredictedEvents = (): PredictedEvent[] => {
     if (state.eventLog.length === 0) return [];
 
+    const capUtc = outputs.nextHardStopUtc ?? null;
+    const napDurationMin = defaultConfig.expectedNapDurationMin;
+
+    const scheduleFromWake = (wakeUtc: number): PredictedEvent[] => {
+      const nap1Start = wakeUtc + 3 * 60 * MS_MIN;
+      const nap1End = nap1Start + napDurationMin * MS_MIN;
+      const nap2Start = nap1End + 3.5 * 60 * MS_MIN;
+      const nap2End = nap2Start + napDurationMin * MS_MIN;
+      const bedtimeRaw = nap2End + 4 * 60 * MS_MIN;
+      const bedtimeUtc = capUtc ? Math.min(capUtc, bedtimeRaw) : bedtimeRaw;
+
+      const candidates: PredictedEvent[] = [
+        makePredictedEvent({
+          id: `feed-morning-${wakeUtc}`,
+          type: "milk",
+          label: "Bottle feed",
+          timeUtc: wakeUtc + 10 * MS_MIN,
+          prep: "Prep feeding supplies",
+        }),
+        makePredictedEvent({
+          id: `solids-breakfast-${wakeUtc}`,
+          type: "solids",
+          label: "Solids",
+          timeUtc: wakeUtc + 45 * MS_MIN,
+          prep: "Prep solids",
+        }),
+        makePredictedEvent({
+          id: `nap1-${nap1Start}`,
+          type: "nap",
+          label: "Nap window",
+          timeUtc: nap1Start,
+          rangeEndUtc: nap1End,
+          prep: "Prepare sleep space",
+        }),
+        makePredictedEvent({
+          id: `feed-postnap1-${nap1End}`,
+          type: "milk",
+          label: "Bottle feed",
+          timeUtc: nap1End + 15 * MS_MIN,
+          prep: "Prep feeding supplies",
+        }),
+        makePredictedEvent({
+          id: `solids-lunch-${nap1End}`,
+          type: "solids",
+          label: "Solids",
+          timeUtc: nap1End + 60 * MS_MIN,
+          prep: "Prep solids",
+        }),
+        makePredictedEvent({
+          id: `nap2-${nap2Start}`,
+          type: "nap",
+          label: "Nap window",
+          timeUtc: nap2Start,
+          rangeEndUtc: nap2End,
+          prep: "Prepare sleep space",
+        }),
+        makePredictedEvent({
+          id: `feed-postnap2-${nap2End}`,
+          type: "milk",
+          label: "Bottle feed",
+          timeUtc: nap2End + 15 * MS_MIN,
+          prep: "Prep feeding supplies",
+        }),
+        makePredictedEvent({
+          id: `solids-dinner-${nap2End}`,
+          type: "solids",
+          label: "Solids",
+          timeUtc: nap2End + 120 * MS_MIN,
+          prep: "Prep solids",
+        }),
+        makePredictedEvent({
+          id: `feed-final-${bedtimeUtc}`,
+          type: "milk",
+          label: "Bottle feed",
+          timeUtc: bedtimeUtc - 30 * MS_MIN,
+          prep: "Prep bedtime feed",
+        }),
+        makePredictedEvent({
+          id: `bedtime-${bedtimeUtc}`,
+          type: "bedtime",
+          label: "Bedtime cap",
+          timeUtc: bedtimeUtc,
+          prep: "Bedtime buffer",
+        }),
+      ];
+
+      return candidates
+        .filter((entry) => (capUtc ? entry.timeUtc <= capUtc : true))
+        .filter((entry) => entry.timeUtc > nowUtcMs)
+        .sort((a, b) => a.timeUtc - b.timeUtc);
+    };
+
     if (outputs.isAsleep) {
-      const expectedWakeOverride =
-        state.eventLog
-          .filter((event) => event.type === "FirstAwake")
-          .map((event) => Date.parse(event.timestampUtc))
-          .filter((timestamp) => !Number.isNaN(timestamp) && timestamp > nowUtcMs)
-          .sort((a, b) => a - b)[0] ?? null;
-      const expectedWakeTime = expectedWakeOverride ?? outputs.expectedWakeUtc;
-      if (!expectedWakeTime) return [];
+      if (!outputs.expectedWakeUtc) return [];
       return [
         makePredictedEvent({
           id: "expected-wake",
           type: "bedtime" as const,
           label: "Expected wake",
-          timeUtc: expectedWakeTime,
+          timeUtc: outputs.expectedWakeUtc,
           prep: "Start the day",
         }),
+        ...scheduleFromWake(outputs.expectedWakeUtc),
       ];
     }
 
-    const capUtc = outputs.nextHardStopUtc ?? null;
-    const candidates: PredictedEvent[] = [];
-
-    if (feedWindowStartUtc && feedWindowEndUtc) {
-      candidates.push(
-        makePredictedEvent({
-          id: `feed-${feedWindowStartUtc}`,
-          type: "milk",
-          label: "Feed window",
-          timeUtc: feedWindowStartUtc,
-          rangeEndUtc: feedWindowEndUtc,
-          prep: "Prep feeding supplies",
-        })
-      );
+    if (state.lastWakeTime) {
+      return scheduleFromWake(state.lastWakeTime);
     }
 
-    if (outputs.nextWindowStartUtc && outputs.nextWindowEndUtc) {
-      candidates.push(
-        makePredictedEvent({
-          id: `nap-${outputs.nextWindowStartUtc}`,
-          type: "nap",
-          label: "Nap window",
-          timeUtc: outputs.nextWindowStartUtc,
-          rangeEndUtc: outputs.nextWindowEndUtc,
-          prep: "Prepare sleep space",
-        })
-      );
-    }
-
-    if (outputs.nextHardStopUtc) {
-      candidates.push(
-        makePredictedEvent({
-          id: `bedtime-${outputs.nextHardStopUtc}`,
-          type: "bedtime",
-          label: "Bedtime cap",
-          timeUtc: outputs.nextHardStopUtc,
-          prep: "Bedtime buffer",
-        })
-      );
-    }
-
-    const sorted = candidates
-      .filter((entry) => (capUtc ? entry.timeUtc <= capUtc : true))
-      .sort((a, b) => a.timeUtc - b.timeUtc);
-
-    if ((outputs.pressureIndicator.wakeUtilization ?? 0) >= 0.85) {
-      return sorted.filter((entry) => entry.type !== "milk").slice(0, 3);
-    }
-
-    return sorted.slice(0, 3);
+    return [];
   };
   const lastRealLog =
     [...state.eventLog]
@@ -509,20 +588,12 @@ export default function App() {
       .pop() ?? null;
   const loggedAsleep = lastRealLog?.event.type === "Asleep";
   const predictedEvents = buildPredictedEvents();
-  const futureFirstAwakeUtc =
-    state.eventLog
-      .filter((event) => event.type === "FirstAwake")
-      .map((event) => Date.parse(event.timestampUtc))
-      .filter((timestamp) => !Number.isNaN(timestamp) && timestamp > nowUtcMs)
-      .sort((a, b) => a - b)[0] ?? null;
   const predictedExpectedWakeUtc =
     outputs.isAsleep
       ? predictedEvents.find((event) => event.label === "Expected wake")?.timeUtc ?? null
       : null;
   const effectiveExpectedWakeUtc =
-    outputs.isAsleep && (futureFirstAwakeUtc || predictedExpectedWakeUtc)
-      ? (futureFirstAwakeUtc ?? predictedExpectedWakeUtc)
-      : outputs.expectedWakeUtc;
+    outputs.isAsleep && predictedExpectedWakeUtc ? predictedExpectedWakeUtc : outputs.expectedWakeUtc;
   const expectedWakeCountdown =
     effectiveExpectedWakeUtc !== null
       ? Math.max(0, Math.ceil((effectiveExpectedWakeUtc - nowUtcMs) / MS_MIN))
@@ -559,8 +630,7 @@ export default function App() {
           ? "NapStarted"
           : "Asleep"
     : null;
-  const upNextType =
-    outputs.isAsleep && futureFirstAwakeUtc ? "MilkGiven" : outputs.isAsleep ? "FirstAwake" : resolvedUpNextType;
+  const upNextType = outputs.isAsleep ? "FirstAwake" : resolvedUpNextType;
   const orderedEvents = (() => {
     const base = [...EVENT_TYPES];
     if (!canLog.FirstAwake) {
