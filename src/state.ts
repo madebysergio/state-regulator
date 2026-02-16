@@ -1,5 +1,4 @@
 import { AppState, CareEvent, CoreState, EventType, RegulationLevel } from "./types";
-import { defaultConfig } from "./constraints";
 
 const MS_MIN = 60 * 1000;
 const DAY_START_HOUR = 7;

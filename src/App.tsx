@@ -27,7 +27,7 @@ import {
 import { computeOutputs, defaultConfig } from "./constraints";
 import { applyEvent, buildEvent, initialAppState, rebuildFromLog } from "./state";
 import { EventType } from "./types";
-import { loadState, loadTimeZone, saveState, saveTimeZone } from "./storage";
+import { loadState, loadTimeZone, saveState } from "./storage";
 
 type PredictedType = "milk" | "solids" | "nap" | "bedtime";
 type PredictedEvent = {
@@ -216,7 +216,7 @@ export default function App() {
   const initialNow = initialNowRef.current;
   const [nowUtcMs, setNowUtcMs] = useState(() => initialNow);
   const [state, setState] = useState(() => loadState(initialNow));
-  const [timeZone, setTimeZone] = useState(() => loadTimeZone());
+  const [timeZone] = useState(() => loadTimeZone());
   const [selectedEvent, setSelectedEvent] = useState<EventType>("FirstAwake");
   const [editId, setEditId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState<string>("");
@@ -281,10 +281,6 @@ export default function App() {
   useEffect(() => {
     saveState(state);
   }, [state]);
-
-  useEffect(() => {
-    saveTimeZone(timeZone);
-  }, [timeZone]);
 
   useEffect(() => {
     setState((prev) => rebuildFromLog(prev.eventLog, nowUtcMs));
@@ -384,10 +380,6 @@ export default function App() {
     outputs.nextWindowStartUtc !== null
       ? Math.max(0, Math.ceil((outputs.nextWindowStartUtc - nowUtcMs) / MS_MIN))
       : null;
-  const hardStopCountdown =
-    outputs.nextHardStopUtc !== null
-      ? Math.max(0, Math.ceil((outputs.nextHardStopUtc - nowUtcMs) / MS_MIN))
-      : null;
   const napInProgress =
     state.lastNapStart !== null &&
     (state.lastNapEnd === null || state.lastNapEnd < state.lastNapStart);
@@ -404,12 +396,6 @@ export default function App() {
     Asleep: true,
   };
 
-  const feedWindowStartUtc = state.lastFeedTime && !outputs.isAsleep
-    ? state.lastFeedTime + defaultConfig.feedIntervalMinMin * MS_MIN
-    : null;
-  const feedWindowEndUtc = state.lastFeedTime && !outputs.isAsleep
-    ? state.lastFeedTime + defaultConfig.feedIntervalMaxMin * MS_MIN
-    : null;
   const TOLERANCE_WINDOW_MIN = 20;
   const FINAL_WAKE_THRESHOLD_MIN = 240;
 
@@ -490,16 +476,6 @@ export default function App() {
     if (snapshot.sleepPressure > snapshot.hungerPressure) {
       return { type: "nap" as const };
     }
-    return null;
-  };
-
-  const resolveSecondaryAction = (
-    snapshot: ReturnType<typeof deriveCurrentState>,
-    next: { type: PredictedType } | null
-  ) => {
-    if (!next) return null;
-    if (next.type === "milk" && !snapshot.lastSolids) return { type: "solids" as const };
-    if (next.type === "nap" && snapshot.hungerPressure > 0.7) return { type: "milk" as const };
     return null;
   };
 
@@ -699,7 +675,6 @@ export default function App() {
     effectiveTimeUtc: item.timeUtc,
   }));
   const nextThreeTimeline = timelineItems;
-  const upNext = upcomingEvents[0] ?? null;
   const resolverSnapshot = deriveCurrentState();
   const resolvedAction = resolveNextAction(resolverSnapshot);
   const resolvedUpNextType: EventType | null = resolvedAction
