@@ -26,6 +26,7 @@ npm run preview
 
 - “Up next” is resolved from current state (resolver), not from the predictions list.
 - “What’s coming up” is derived from a baseline schedule that shifts relative to the last real log.
+- “What’s coming up” is derived from live state outputs (wake window, feed window, bedtime cap) and pruned when the window compresses.
 - Routine logs are tracked for duration stats only and do not affect predictions or state.
 - Auto-predicted logs are labeled and can be edited or deleted.
 - After bedtime, upcoming events show the next morning’s expected wake without creating new logs.
