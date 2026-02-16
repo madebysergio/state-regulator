@@ -332,6 +332,28 @@ export default function App() {
     outputs.pressureIndicator.wakeUtilization === null
       ? null
       : Math.max(0, Math.min(100, Math.round(outputs.pressureIndicator.wakeUtilization * 100)));
+  const realStructuralEvents = state.eventLog.filter(
+    (event) => !event.autoPredicted && event.type !== "RoutineStarted"
+  );
+  const isPreAnchor = realStructuralEvents.length === 0;
+  const futureAutoFirstAwakeUtc =
+    state.eventLog
+      .filter((event) => event.autoPredicted && event.type === "FirstAwake")
+      .map((event) => Date.parse(event.timestampUtc))
+      .filter((timestamp) => !Number.isNaN(timestamp) && timestamp > nowUtcMs)
+      .sort((a, b) => a - b)[0] ?? null;
+  const fallbackDesiredWakeUtc = (() => {
+    const parts = getZonedParts(nowUtcMs, timeZone);
+    const todaySevenUtc = zonedToUtc(
+      { year: parts.year, month: parts.month, day: parts.day, hour: 7, minute: 0 },
+      timeZone
+    );
+    if (todaySevenUtc > nowUtcMs) return todaySevenUtc;
+    return zonedToUtc(
+      { year: parts.year, month: parts.month, day: parts.day + 1, hour: 7, minute: 0 },
+      timeZone
+    );
+  })();
   const napStarts = state.eventLog
     .filter((event) => event.type === "NapStarted")
     .map((event) => Date.parse(event.timestampUtc));
@@ -393,12 +415,23 @@ export default function App() {
 
   const getLastEvent = (type: EventType) =>
     [...state.eventLog]
-      .filter((event) => event.type === type)
+      .filter((event) => event.type === type && !event.autoPredicted)
       .map((event) => Date.parse(event.timestampUtc))
       .filter((timestamp) => !Number.isNaN(timestamp) && timestamp <= nowUtcMs)
       .pop() ?? null;
 
   const deriveCurrentState = () => {
+    if (isPreAnchor) {
+      return {
+        hungerPressure: 0,
+        sleepPressure: 0,
+        wakeDuration: 0,
+        lastSolids: null,
+        lastMilk: null,
+        lastNap: null,
+        dayClosed: false,
+      };
+    }
     const hungerPressure = state.timeSinceLastFeed
       ? Math.min(1, state.timeSinceLastFeed / (defaultConfig.feedIntervalMaxMin * MS_MIN))
       : 0;
@@ -435,7 +468,9 @@ export default function App() {
             ? "NapStarted"
             : "Asleep";
     const targetType = matchType(predicted.type);
-    return logged.some((event) => {
+    return logged
+      .filter((event) => !event.autoPredicted)
+      .some((event) => {
       if (event.type !== targetType) return false;
       const delta = Math.abs(Date.parse(event.timestampUtc) - predicted.timeUtc);
       return delta < tolerance;
@@ -444,6 +479,9 @@ export default function App() {
 
   const resolveNextAction = (snapshot: ReturnType<typeof deriveCurrentState>) => {
     if (snapshot.dayClosed) return { type: "bedtime" as const };
+    if (snapshot.lastSolids && (!snapshot.lastMilk || snapshot.lastMilk < snapshot.lastSolids)) {
+      return { type: "milk" as const };
+    }
     if (snapshot.hungerPressure > snapshot.sleepPressure) {
       if (!snapshot.lastSolids) return { type: "solids" as const };
       if (!snapshot.lastMilk) return { type: "milk" as const };
@@ -467,6 +505,18 @@ export default function App() {
 
   const buildPredictedEvents = (): PredictedEvent[] => {
     if (state.eventLog.length === 0) return [];
+    if (isPreAnchor) {
+      const expectedWakeTime = futureAutoFirstAwakeUtc ?? fallbackDesiredWakeUtc;
+      return [
+        makePredictedEvent({
+          id: "expected-wake-pre-anchor",
+          type: "bedtime",
+          label: "Expected wake",
+          timeUtc: expectedWakeTime,
+          prep: "Start the day",
+        }),
+      ];
+    }
 
     const capUtc = outputs.nextHardStopUtc ?? null;
     const napDurationMin = defaultConfig.expectedNapDurationMin;
@@ -554,10 +604,41 @@ export default function App() {
         }),
       ];
 
-      return candidates
+      const sorted = candidates
         .filter((entry) => (capUtc ? entry.timeUtc <= capUtc : true))
         .filter((entry) => entry.timeUtc > nowUtcMs)
         .sort((a, b) => a.timeUtc - b.timeUtc);
+
+      const lastRealSolidsUtc = getLastEvent("SolidsGiven");
+      const lastRealMilkUtc = getLastEvent("MilkGiven");
+      const requireBottleBeforeNap =
+        lastRealSolidsUtc !== null &&
+        (lastRealMilkUtc === null || lastRealMilkUtc < lastRealSolidsUtc);
+
+      if (!requireBottleBeforeNap) {
+        return sorted;
+      }
+
+      const nextNap = sorted.find((entry) => entry.type === "nap");
+      if (!nextNap) return sorted;
+
+      const lowerBound = Math.max(lastRealSolidsUtc + 20 * MS_MIN, nowUtcMs + 2 * MS_MIN);
+      const preferred = nextNap.timeUtc - 30 * MS_MIN;
+      const preNapBottleUtc = Math.min(Math.max(lowerBound, preferred), nextNap.timeUtc - 5 * MS_MIN);
+      if (preNapBottleUtc <= nowUtcMs) return sorted;
+
+      const forcedBottle = makePredictedEvent({
+        id: `feed-before-nap-${nextNap.timeUtc}`,
+        type: "milk",
+        label: "Bottle feed",
+        timeUtc: preNapBottleUtc,
+        prep: "Prep feeding supplies",
+      });
+
+      const withoutPreNapSolids = sorted.filter(
+        (entry) => !(entry.type === "solids" && entry.timeUtc < nextNap.timeUtc)
+      );
+      return [...withoutPreNapSolids, forcedBottle].sort((a, b) => a.timeUtc - b.timeUtc);
     };
 
     if (outputs.isAsleep) {
@@ -630,7 +711,13 @@ export default function App() {
           ? "NapStarted"
           : "Asleep"
     : null;
-  const upNextType = outputs.isAsleep ? "FirstAwake" : resolvedUpNextType;
+  const upNextType = isPreAnchor
+    ? "FirstAwake"
+    : outputs.isAsleep
+      ? isNightSleep
+        ? "FirstAwake"
+        : "NapEnded"
+      : resolvedUpNextType;
   const orderedEvents = (() => {
     const base = [...EVENT_TYPES];
     if (!canLog.FirstAwake) {
@@ -702,7 +789,9 @@ export default function App() {
     }
   }, [upNextType]);
 
-  const currentStatus = outputs.isAsleep
+  const currentStatus = isPreAnchor
+    ? "Awaiting first log"
+    : outputs.isAsleep
     ? "Sleeping"
     : napInProgress
       ? "Napping"
@@ -711,6 +800,9 @@ export default function App() {
         : state.lastWakeTime && nowUtcMs - state.lastWakeTime < 30 * MS_MIN
           ? "Getting ready"
           : "Playtime";
+  const rightNowSummary = isPreAnchor
+    ? ["Awaiting first log", "Last slept —", "No feed logged yet", "Very settled"]
+    : outputs.stateSummary;
   const routineDurations = (() => {
     const events = [...state.eventLog]
       .map((event) => ({ event, ts: Date.parse(event.timestampUtc) }))
@@ -1159,7 +1251,7 @@ export default function App() {
             Right now
           </h2>
           <ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {outputs.stateSummary.map((item, index) => (
+            {rightNowSummary.map((item, index) => (
               <li
                 key={`${item}-${index}`}
                 className="rounded-xl bg-white p-5 text-base font-medium dark:bg-gh-surface-2"
@@ -1212,7 +1304,7 @@ export default function App() {
                 Next chance
               </div>
               <div className="mt-3 flex flex-wrap items-baseline gap-3">
-                {outputs.isAsleep ? (
+                {isPreAnchor || outputs.isAsleep ? (
                   <span className="text-4xl font-semibold text-ink dark:text-gh-text">
                     Expected wake
                   </span>
@@ -1225,25 +1317,25 @@ export default function App() {
                     Calculating...
                   </span>
                 )}
-                {!outputs.isAsleep && outputs.nextWindowStartUtc ? (
+                {!isPreAnchor && !outputs.isAsleep && outputs.nextWindowStartUtc ? (
                   <span className="text-sm text-muted dark:text-gh-muted">
                     starts {formatTimeZoned(outputs.nextWindowStartUtc, timeZone)}
                   </span>
                 ) : null}
               </div>
-              {outputs.isAsleep && effectiveExpectedWakeUtc ? (
+              {(isPreAnchor || outputs.isAsleep) && effectiveExpectedWakeUtc ? (
                 <div className="mt-2 text-sm text-muted dark:text-gh-muted">
                   {expectedWakeCountdown !== null
                     ? `Expected wake in ${formatCountdown(expectedWakeCountdown)}`
                     : `Expected wake ${formatTimeZoned(effectiveExpectedWakeUtc, timeZone)}`}
                 </div>
               ) : null}
-              {outputs.isAsleep && effectiveExpectedWakeUtc ? (
+              {(isPreAnchor || outputs.isAsleep) && effectiveExpectedWakeUtc ? (
                 <div className="mt-1 text-sm text-muted dark:text-gh-muted">
                   Next: Morning feed and the first wake window.
                 </div>
               ) : null}
-              {!outputs.isAsleep ? (
+              {!isPreAnchor && !outputs.isAsleep ? (
                 <div className="mt-4 border-t border-panel-strong pt-3 dark:border-gh-border">
                   <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
                     OK now
@@ -1316,9 +1408,9 @@ export default function App() {
                     : outputs.pressureIndicator.regulationRisk === "rising"
                       ? "text-warning"
                       : "text-allowed"
-                  } ${wakeRemaining === null && !outputs.isAsleep ? "animate-pulse" : ""}`}
+                  } ${wakeRemaining === null && !outputs.isAsleep && !isPreAnchor ? "animate-pulse" : ""}`}
               >
-                {outputs.isAsleep
+                {isPreAnchor || outputs.isAsleep
                   ? expectedWakeCountdown !== null
                     ? `Wake in ${formatCountdown(expectedWakeCountdown)}`
                     : "Wake in —"
@@ -1328,10 +1420,10 @@ export default function App() {
                       : `${wakeRemaining} min remaining`
                     : "Calculating..."}
               </div>
-              {outputs.isAsleep ? (
+              {isPreAnchor || outputs.isAsleep ? (
                 <MoonStars className="h-6 w-6 text-accent dark:text-gh-accent" />
               ) : null}
-              {!outputs.isAsleep && outputs.pressureIndicator.regulationRisk !== "low" ? (
+              {!outputs.isAsleep && !isPreAnchor && outputs.pressureIndicator.regulationRisk !== "low" ? (
                 <AlertTriangle
                   className={`h-6 w-6 ${outputs.pressureIndicator.regulationRisk === "high"
                       ? "text-suppressed"
@@ -1341,7 +1433,7 @@ export default function App() {
               ) : null}
             </div>
             <div className="mt-2 text-sm text-muted dark:text-gh-muted">
-              {outputs.isAsleep
+              {isPreAnchor || outputs.isAsleep
                 ? expectedWakeCountdown !== null
                   ? `Expected wake in ${formatCountdown(expectedWakeCountdown)}`
                   : "Expected wake time pending"

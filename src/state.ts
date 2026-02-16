@@ -191,6 +191,28 @@ const hasMatchingEvent = (
   });
 };
 
+const getDayKey = (utcMs: number, timeZone: string) => {
+  const parts = getZonedParts(utcMs, timeZone);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`;
+};
+
+const hasRealEventOfTypeOnDay = (
+  events: CareEvent[],
+  type: EventType,
+  timestamp: number,
+  timeZone: string
+) => {
+  const targetDay = getDayKey(timestamp, timeZone);
+  return events.some((event) => {
+    if (event.autoPredicted) return false;
+    if (event.type !== type) return false;
+    const eventTime = Date.parse(event.timestampUtc);
+    if (Number.isNaN(eventTime)) return false;
+    return getDayKey(eventTime, timeZone) === targetDay;
+  });
+};
+
 const isSuppressedAuto = (
   suppressed: { type: EventType; timestampUtc: string }[],
   type: EventType,
@@ -261,6 +283,7 @@ const normalizeEventLog = (
   now: number,
   suppressed: { type: EventType; timestampUtc: string }[]
 ): CareEvent[] => {
+  const timeZone = resolveTimeZone();
   const ordered = [...eventLog].sort(
     (a, b) => Date.parse(a.timestampUtc) - Date.parse(b.timestampUtc)
   );
@@ -322,12 +345,16 @@ const normalizeEventLog = (
 
   const baselineEvents = buildBaselineEvents(firstWakeUtc, horizonUtc);
   const merged = [...withFirstAwake];
+  const realMerged = merged.filter((event) => !event.autoPredicted && isCoreEvent(event));
   baselineEvents.forEach((candidate) => {
     const candidateTime = Date.parse(candidate.timestampUtc);
     if (Number.isNaN(candidateTime)) return;
     if (candidateTime > lastRealTimestamp) return;
     if (isSuppressedAuto(suppressed, candidate.type, candidateTime)) return;
-    if (hasMatchingEvent(merged, candidate.type, candidateTime)) return;
+    // A real user event of the same type on the same day always dominates baseline autos.
+    if (hasRealEventOfTypeOnDay(realMerged, candidate.type, candidateTime, timeZone)) return;
+    if (hasMatchingEvent(realMerged, candidate.type, candidateTime)) return;
+    if (hasMatchingEvent(merged.filter((event) => event.autoPredicted), candidate.type, candidateTime)) return;
     merged.push(candidate);
   });
 
