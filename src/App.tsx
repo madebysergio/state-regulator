@@ -298,13 +298,13 @@ export default function App() {
   const historyDelta =
     napStarts.length >= 2
       ? (() => {
-          const last = napStarts[napStarts.length - 1];
-          const prev = napStarts[napStarts.length - 2];
-          const deltaMin = Math.round((last - prev) / MS_MIN);
-          if (deltaMin === 0) return null;
-          const direction = deltaMin < 0 ? "earlier" : "later";
-          return `Nap detected ${Math.abs(deltaMin)} min ${direction} than previous → adjusted next nap time`;
-        })()
+        const last = napStarts[napStarts.length - 1];
+        const prev = napStarts[napStarts.length - 2];
+        const deltaMin = Math.round((last - prev) / MS_MIN);
+        if (deltaMin === 0) return null;
+        const direction = deltaMin < 0 ? "earlier" : "later";
+        return `Nap detected ${Math.abs(deltaMin)} min ${direction} than previous → adjusted next nap time`;
+      })()
       : null;
   const hasInsights =
     outputs.shiftPreview.some((item) => item.status === "applied") || Boolean(historyDelta);
@@ -392,10 +392,10 @@ export default function App() {
       type === "milk"
         ? "MilkGiven"
         : type === "solids"
-        ? "SolidsGiven"
-        : type === "nap"
-        ? "NapStarted"
-        : "Asleep";
+          ? "SolidsGiven"
+          : type === "nap"
+            ? "NapStarted"
+            : "Asleep";
     const targetType = matchType(predicted.type);
     return logged.some((event) => {
       if (event.type !== targetType) return false;
@@ -428,115 +428,71 @@ export default function App() {
   };
 
   const buildPredictedEvents = (): PredictedEvent[] => {
-    const realEvents = [...state.eventLog]
-      .filter((event) => !event.autoPredicted && event.type !== "RoutineStarted")
-      .map((event) => ({ ...event, ts: Date.parse(event.timestampUtc) }))
-      .filter((event) => !Number.isNaN(event.ts) && event.ts <= nowUtcMs);
-    if (realEvents.length === 0) return [];
+    if (state.eventLog.length === 0) return [];
 
-    const lastReal = realEvents[realEvents.length - 1];
-    if (lastReal.type === "Asleep") {
-      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-      const dayParts = getZonedParts(lastReal.ts, timeZone);
-      const tomorrowParts = {
-        year: dayParts.year,
-        month: dayParts.month,
-        day: dayParts.day + 1,
-      };
-      const atTomorrow = (hour: number, minute: number) =>
-        getUtcMsFromZoned(
-          {
-            year: tomorrowParts.year,
-            month: tomorrowParts.month,
-            day: tomorrowParts.day,
-            hour,
-            minute,
-          },
-          timeZone
-        );
+    if (outputs.isAsleep) {
+      if (!outputs.expectedWakeUtc) return [];
       return [
         makePredictedEvent({
-          id: "tomorrow-wake",
+          id: "expected-wake",
           type: "bedtime" as const,
           label: "Expected wake",
-          timeUtc: atTomorrow(7, 0),
+          timeUtc: outputs.expectedWakeUtc,
           prep: "Start the day",
         }),
       ];
     }
-    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-    const dayParts = getZonedParts(lastReal.ts, timeZone);
-    const dayStartUtc = getUtcMsFromZoned(
-      {
-        year: dayParts.year,
-        month: dayParts.month,
-        day: dayParts.day,
-        hour: 7,
-        minute: 0,
-      },
-      timeZone
-    );
 
-    const baseline = [
-      { type: "FirstAwake" as const, label: "First awake", offsetMin: 0 },
-      { type: "MilkGiven" as const, label: "Bottle feed", offsetMin: 10 },
-      { type: "SolidsGiven" as const, label: "Solids", offsetMin: 45 },
-      { type: "NapStarted" as const, label: "Nap window", offsetMin: 165, rangeEndOffsetMin: 255 },
-      { type: "NapEnded" as const, label: "Nap ended", offsetMin: 255 },
-      { type: "MilkGiven" as const, label: "Bottle feed", offsetMin: 270 },
-      { type: "SolidsGiven" as const, label: "Solids", offsetMin: 300 },
-      { type: "NapStarted" as const, label: "Nap window", offsetMin: 450, rangeEndOffsetMin: 540 },
-      { type: "NapEnded" as const, label: "Nap ended", offsetMin: 540 },
-      { type: "MilkGiven" as const, label: "Bottle feed", offsetMin: 540 },
-      { type: "SolidsGiven" as const, label: "Solids", offsetMin: 630 },
-      { type: "MilkGiven" as const, label: "Bottle feed", offsetMin: 690 },
-      { type: "Asleep" as const, label: "Bedtime", offsetMin: 705 },
-    ];
+    const capUtc = outputs.nextHardStopUtc ?? null;
+    const candidates: PredictedEvent[] = [];
 
-    const lastBaselineIndex = baseline
-      .map((entry, index) => ({ entry, index }))
-      .filter(({ entry }) => entry.type === lastReal.type)
-      .pop();
-    if (!lastBaselineIndex) return [];
-    const baseTime = dayStartUtc + lastBaselineIndex.entry.offsetMin * MS_MIN;
-    const delta = lastReal.ts - baseTime;
+    if (feedWindowStartUtc && feedWindowEndUtc) {
+      candidates.push(
+        makePredictedEvent({
+          id: `feed-${feedWindowStartUtc}`,
+          type: "milk",
+          label: "Feed window",
+          timeUtc: feedWindowStartUtc,
+          rangeEndUtc: feedWindowEndUtc,
+          prep: "Prep feeding supplies",
+        })
+      );
+    }
 
-    const upcoming: PredictedEvent[] = baseline
-      .slice(lastBaselineIndex.index + 1)
-      .map((entry, index) => {
-        const timeUtc = dayStartUtc + entry.offsetMin * MS_MIN + delta;
-        const rangeEndUtc = entry.rangeEndOffsetMin
-          ? dayStartUtc + entry.rangeEndOffsetMin * MS_MIN + delta
-          : null;
-        const type: PredictedType =
-          entry.type === "MilkGiven"
-            ? "milk"
-            : entry.type === "SolidsGiven"
-            ? "solids"
-            : entry.type === "NapStarted"
-            ? "nap"
-            : "bedtime";
-        return makePredictedEvent({
-          id: `pred-${entry.type}-${index}-${timeUtc}`,
-          type,
-          label: entry.label,
-          timeUtc,
-          rangeEndUtc,
-          prep:
-            entry.type === "MilkGiven"
-              ? "Prep feeding supplies"
-              : entry.type === "SolidsGiven"
-              ? "Prep solids"
-              : entry.type === "NapStarted"
-              ? "Prepare sleep space"
-              : entry.type === "NapEnded"
-              ? "Wake window resets"
-              : "Bedtime",
-        });
-      })
-      .filter((entry) => entry.timeUtc >= lastReal.ts);
+    if (outputs.nextWindowStartUtc && outputs.nextWindowEndUtc) {
+      candidates.push(
+        makePredictedEvent({
+          id: `nap-${outputs.nextWindowStartUtc}`,
+          type: "nap",
+          label: "Nap window",
+          timeUtc: outputs.nextWindowStartUtc,
+          rangeEndUtc: outputs.nextWindowEndUtc,
+          prep: "Prepare sleep space",
+        })
+      );
+    }
 
-    return upcoming;
+    if (outputs.nextHardStopUtc) {
+      candidates.push(
+        makePredictedEvent({
+          id: `bedtime-${outputs.nextHardStopUtc}`,
+          type: "bedtime",
+          label: "Bedtime cap",
+          timeUtc: outputs.nextHardStopUtc,
+          prep: "Bedtime buffer",
+        })
+      );
+    }
+
+    const sorted = candidates
+      .filter((entry) => (capUtc ? entry.timeUtc <= capUtc : true))
+      .sort((a, b) => a.timeUtc - b.timeUtc);
+
+    if ((outputs.pressureIndicator.wakeUtilization ?? 0) >= 0.85) {
+      return sorted.filter((entry) => entry.type !== "milk").slice(0, 3);
+    }
+
+    return sorted.slice(0, 3);
   };
   const lastRealLog =
     [...state.eventLog]
@@ -559,14 +515,14 @@ export default function App() {
   const sleepProgressPct =
     outputs.isAsleep && effectiveExpectedWakeUtc && lastAsleepUtc
       ? Math.max(
-          0,
-          Math.min(
-            100,
-            Math.round(
-              ((nowUtcMs - lastAsleepUtc) / (effectiveExpectedWakeUtc - lastAsleepUtc)) * 100
-            )
+        0,
+        Math.min(
+          100,
+          Math.round(
+            ((nowUtcMs - lastAsleepUtc) / (effectiveExpectedWakeUtc - lastAsleepUtc)) * 100
           )
         )
+      )
       : null;
   const upcomingEvents = predictedEvents.filter(
     (predicted) => !isEventSatisfied(predicted, state.eventLog)
@@ -583,10 +539,10 @@ export default function App() {
     ? resolvedAction.type === "milk"
       ? "MilkGiven"
       : resolvedAction.type === "solids"
-      ? "SolidsGiven"
-      : resolvedAction.type === "nap"
-      ? "NapStarted"
-      : "Asleep"
+        ? "SolidsGiven"
+        : resolvedAction.type === "nap"
+          ? "NapStarted"
+          : "Asleep"
     : null;
   const upNextType = outputs.isAsleep ? "FirstAwake" : resolvedUpNextType;
   const orderedEvents = (() => {
@@ -638,12 +594,12 @@ export default function App() {
   const currentStatus = outputs.isAsleep
     ? "Sleeping"
     : napInProgress
-    ? "Napping"
-    : state.lastFeedTime && nowUtcMs - state.lastFeedTime < 30 * MS_MIN
-    ? "Feeding"
-    : state.lastWakeTime && nowUtcMs - state.lastWakeTime < 30 * MS_MIN
-    ? "Getting ready"
-    : "Playtime";
+      ? "Napping"
+      : state.lastFeedTime && nowUtcMs - state.lastFeedTime < 30 * MS_MIN
+        ? "Feeding"
+        : state.lastWakeTime && nowUtcMs - state.lastWakeTime < 30 * MS_MIN
+          ? "Getting ready"
+          : "Playtime";
   const routineDurations = (() => {
     const events = [...state.eventLog]
       .map((event) => ({ event, ts: Date.parse(event.timestampUtc) }))
@@ -713,9 +669,9 @@ export default function App() {
       );
       const autoSuppressed = target?.autoPredicted
         ? [
-            ...prev.autoSuppressed,
-            { type: target.type, timestampUtc: target.timestampUtc },
-          ]
+          ...prev.autoSuppressed,
+          { type: target.type, timestampUtc: target.timestampUtc },
+        ]
         : prev.autoSuppressed;
       return rebuildFromLog(
         eventLog.sort((a, b) => Date.parse(a.timestampUtc) - Date.parse(b.timestampUtc)),
@@ -738,9 +694,9 @@ export default function App() {
       const eventLog = prev.eventLog.filter((event) => event.id !== eventId);
       const autoSuppressed = target?.autoPredicted
         ? [
-            ...prev.autoSuppressed,
-            { type: target.type, timestampUtc: target.timestampUtc },
-          ]
+          ...prev.autoSuppressed,
+          { type: target.type, timestampUtc: target.timestampUtc },
+        ]
         : prev.autoSuppressed;
       return rebuildFromLog(eventLog, nowUtcMs, autoSuppressed);
     });
@@ -771,604 +727,593 @@ export default function App() {
       </section>
 
       <div className="mt-6 flex flex-col gap-6">
-      <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 flex flex-col">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="flex items-center gap-2 font-display text-2xl">
-            <ClipboardList className="h-6 w-6 text-accent dark:text-gh-accent" />
-            Today's log
-          </h2>
-          <div className="flex items-center gap-2">
-            <span className="min-w-[44px] pl-1 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-              Sort
-            </span>
-            <div className="relative">
-              <select
-                className="appearance-none rounded-full border border-panel-strong bg-white px-3 py-2 pr-10 text-sm dark:border-gh-border dark:bg-gh-surface"
-                value={eventLogSort}
-                onChange={(eventTarget) =>
-                  setEventLogSort(eventTarget.target.value as "latest" | "oldest")
-                }
-              >
-                <option value="latest">Latest</option>
-                <option value="oldest">Oldest</option>
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted dark:text-gh-muted" />
-            </div>
-          </div>
-        </div>
-        <div className="mt-4 grid gap-6 xl:grid-cols-2">
-          <div>
-            <h3 className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-              Log activity
-            </h3>
-            <div className="mt-3 relative">
-              <div className="h-[190px] snap-y snap-mandatory overflow-y-auto pr-2 space-y-3">
-                {orderedEvents.map((event) => {
-                  const highlightRoutine =
-                    event.type === "RoutineStarted" &&
-                    outputs.pressureIndicator.regulationRisk === "rising" &&
-                    (outputs.pressureIndicator.wakeUtilization ?? 0) >= 0.85 &&
-                    outputs.windowCategories.allowed.includes("Routine reset");
-                  const isNext = upNextType === event.type;
-                  return (
-                    <button
-                      key={event.type}
-                      className={`w-full min-h-[76px] snap-start rounded-2xl border px-5 py-4 text-left text-base transition-all duration-300 ${EASE_CURVE} ${
-                        selectedEvent === event.type
-                          ? "border-accent bg-accent-soft dark:bg-gh-surface-2"
-                          : "border-transparent bg-white dark:bg-gh-surface-2"
-                      } ${highlightRoutine || isNext ? "ring-2 ring-accent/30 border-accent" : ""}`}
-                      onClick={() => setSelectedEvent(event.type)}
-                      type="button"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          {EVENT_ICONS[event.type]}
-                          <div>
-                            <span className="block text-lg font-medium">{event.label}</span>
-                            <small className="text-sm text-muted dark:text-gh-muted">
-                              {event.hint}
-                            </small>
-                          </div>
-                        </div>
-                        {isNext ? (
-                          <span className="rounded-full border border-accent px-3 py-1 text-xs uppercase tracking-[0.1em] text-accent">
-                            Up next
-                          </span>
-                        ) : null}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-b from-transparent to-panel dark:to-gh-surface" />
-            </div>
-            <div className="mt-4 flex w-full flex-col gap-3">
-              <button
-                className={`w-full rounded-full bg-accent px-6 py-3 text-base font-semibold text-white transition-all duration-300 ${EASE_CURVE}`}
-                onClick={addEvent}
-                type="button"
-              >
-                Log {EVENT_TYPES.find((event) => event.type === selectedEvent)?.label}
-              </button>
-              <button
-                className={`w-full rounded-full border border-panel-strong bg-white px-6 py-3 text-base transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:bg-gh-surface`}
-                onClick={clearAll}
-                type="button"
-              >
-                Start over
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <h3 className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+        <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 flex flex-col">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="flex items-center gap-2 font-display text-2xl">
+              <ClipboardList className="h-6 w-6 text-accent dark:text-gh-accent" />
               Today's log
-            </h3>
-            {eventCount === 0 ? (
-              <div className="mt-3 text-sm text-muted dark:text-gh-muted">No events logged yet.</div>
-            ) : (
-              <div className="mt-3 flex flex-col gap-4">
-                {groupedEventLog.map((group) => (
-                  <div key={group.date} className="flex flex-col gap-3">
-                    <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-                      {group.date}
-                    </div>
-                    {group.events.slice(0, 2).map((event) => (
-                      <div
-                        key={event.id}
-                        className="flex min-h-[64px] flex-col items-start gap-4 rounded-xl bg-white p-4 fade-in dark:bg-gh-surface-2 sm:flex-row sm:items-center sm:justify-between"
+            </h2>
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <select
+                  className="appearance-none rounded-full border border-panel-strong bg-white px-3 py-2 pr-10 text-sm dark:border-gh-border dark:bg-gh-surface"
+                  value={eventLogSort}
+                  onChange={(eventTarget) =>
+                    setEventLogSort(eventTarget.target.value as "latest" | "oldest")
+                  }
+                >
+                  <option value="latest">Latest</option>
+                  <option value="oldest">Oldest</option>
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted dark:text-gh-muted" />
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-6 xl:grid-cols-2">
+            <div>
+              <h3 className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                Log activity
+              </h3>
+              <div className="mt-3 relative">
+                <div className="h-[190px] snap-y snap-mandatory overflow-y-auto pr-2 space-y-3">
+                  {orderedEvents.map((event) => {
+                    const highlightRoutine =
+                      event.type === "RoutineStarted" &&
+                      outputs.pressureIndicator.regulationRisk === "rising" &&
+                      (outputs.pressureIndicator.wakeUtilization ?? 0) >= 0.85 &&
+                      outputs.windowCategories.allowed.includes("Routine reset");
+                    const isNext = upNextType === event.type;
+                    return (
+                      <button
+                        key={event.type}
+                        className={`w-full min-h-[76px] snap-start rounded-2xl border px-5 py-4 text-left text-base transition-all duration-300 ${EASE_CURVE} ${selectedEvent === event.type
+                            ? "border-accent bg-accent-soft dark:bg-gh-surface-2"
+                            : "border-transparent bg-white dark:bg-gh-surface-2"
+                          } ${highlightRoutine || isNext ? "ring-2 ring-accent/30 border-accent" : ""}`}
+                        onClick={() => setSelectedEvent(event.type)}
+                        type="button"
                       >
-                        <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:gap-3">
-                          <div className="sm:shrink-0">{EVENT_ICONS[event.type]}</div>
-                          <div className="flex w-full flex-col gap-2">
-                            <strong className="text-[24px]">{EVENT_LABELS[event.type]}</strong>
-                            {event.autoPredicted ? (
-                              <small className="w-fit rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-[9px] uppercase tracking-[0.16em] text-accent dark:border-gh-accent/50 dark:bg-gh-accent/10 dark:text-gh-accent">
-                                auto-predicted
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            {EVENT_ICONS[event.type]}
+                            <div>
+                              <span className="block text-lg font-medium">{event.label}</span>
+                              <small className="text-sm text-muted dark:text-gh-muted">
+                                {event.hint}
                               </small>
-                            ) : null}
-                            <span className="text-base font-semibold text-accent dark:text-gh-accent">
-                              {formatTimeZoned(Date.parse(event.timestampUtc), timeZone)}
-                            </span>
-                            <small className="text-sm text-muted dark:text-gh-muted">
-                              {formatAge(
-                                Math.max(
-                                  0,
-                                  Math.round((nowUtcMs - Date.parse(event.timestampUtc)) / MS_MIN)
-                                )
-                              )}
-                            </small>
+                            </div>
                           </div>
+                          {isNext ? (
+                            <span className="rounded-full border border-accent px-3 py-1 text-xs uppercase tracking-[0.1em] text-accent">
+                              Up next
+                            </span>
+                          ) : null}
                         </div>
-                        <div className="flex w-full items-center gap-2 sm:w-auto">
-                          {editId === event.id ? (
-                            <>
-                              <div className="flex w-full items-center gap-2 rounded-full border border-panel-strong bg-white px-4 py-3 shadow-[0_0_0_1px_rgba(0,0,0,0.02)] dark:border-gh-border dark:bg-gh-surface sm:w-auto">
-                                <input
-                                  type="datetime-local"
-                                  className="bg-transparent text-sm outline-none"
-                                  value={editValue}
-                                  onChange={(eventTarget) => setEditValue(eventTarget.target.value)}
-                                />
-                                <span className="flex h-7 w-7 items-center justify-center rounded-full border border-panel-strong text-muted">
-                                  <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
-                                    <path
-                                      d="M7 3v2M17 3v2M4 8h16M5 6h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z"
-                                      fill="none"
-                                      stroke="currentColor"
-                                      strokeWidth="1.5"
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                    />
-                                  </svg>
-                                </span>
-                              </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-b from-transparent to-panel dark:to-gh-surface" />
+              </div>
+              <div className="mt-4 flex w-full flex-col gap-3">
+                <button
+                  className={`w-full rounded-full bg-accent px-6 py-3 text-base font-semibold text-white transition-all duration-300 ${EASE_CURVE}`}
+                  onClick={addEvent}
+                  type="button"
+                >
+                  Log {EVENT_TYPES.find((event) => event.type === selectedEvent)?.label}
+                </button>
+                <button
+                  className={`w-full rounded-full border border-panel-strong bg-white px-6 py-3 text-base transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:bg-gh-surface`}
+                  onClick={clearAll}
+                  type="button"
+                >
+                  Start over
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                Today's log
+              </h3>
+              {eventCount === 0 ? (
+                <div className="mt-3 text-sm text-muted dark:text-gh-muted">No events logged yet.</div>
+              ) : (
+                <div className="mt-3 flex flex-col gap-4">
+                  {groupedEventLog.map((group) => (
+                    <div key={group.date} className="flex flex-col gap-3">
+                      <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                        {group.date}
+                      </div>
+                      {group.events.slice(0, 2).map((event) => (
+                        <div
+                          key={event.id}
+                          className="flex min-h-[64px] flex-col items-start gap-4 rounded-xl bg-white p-4 fade-in dark:bg-gh-surface-2 sm:flex-row sm:items-center sm:justify-between"
+                        >
+                          <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:gap-3">
+                            <div className="sm:shrink-0">{EVENT_ICONS[event.type]}</div>
+                            <div className="flex w-full flex-col gap-2">
+                              <strong className="text-[24px]">{EVENT_LABELS[event.type]}</strong>
+                              {event.autoPredicted ? (
+                                <small className="w-fit rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-[9px] uppercase tracking-[0.16em] text-accent dark:border-gh-accent/50 dark:bg-gh-accent/10 dark:text-gh-accent">
+                                  auto-predicted
+                                </small>
+                              ) : null}
+                              <span className="text-base font-semibold text-accent dark:text-gh-accent">
+                                {formatTimeZoned(Date.parse(event.timestampUtc), timeZone)}
+                              </span>
+                              <small className="text-sm text-muted dark:text-gh-muted">
+                                {formatAge(
+                                  Math.max(
+                                    0,
+                                    Math.round((nowUtcMs - Date.parse(event.timestampUtc)) / MS_MIN)
+                                  )
+                                )}
+                              </small>
+                            </div>
+                          </div>
+                          <div className="flex w-full items-center gap-2 sm:w-auto">
+                            {editId === event.id ? (
+                              <>
+                                <div className="flex w-full items-center gap-2 rounded-full border border-panel-strong bg-white px-4 py-3 shadow-[0_0_0_1px_rgba(0,0,0,0.02)] dark:border-gh-border dark:bg-gh-surface sm:w-auto">
+                                  <input
+                                    type="datetime-local"
+                                    className="bg-transparent text-sm outline-none"
+                                    value={editValue}
+                                    onChange={(eventTarget) => setEditValue(eventTarget.target.value)}
+                                  />
+                                  <span className="flex h-7 w-7 items-center justify-center rounded-full border border-panel-strong text-muted">
+                                    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+                                      <path
+                                        d="M7 3v2M17 3v2M4 8h16M5 6h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="1.5"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      />
+                                    </svg>
+                                  </span>
+                                </div>
+                                <button
+                                  className={`w-full h-11 rounded-full bg-accent px-6 text-base font-semibold text-white transition-all duration-300 ${EASE_CURVE} sm:w-auto`}
+                                  onClick={commitEdit}
+                                  type="button"
+                                >
+                                  Save
+                                </button>
+                              </>
+                            ) : (
                               <button
-                                className={`w-full h-11 rounded-full bg-accent px-6 text-base font-semibold text-white transition-all duration-300 ${EASE_CURVE} sm:w-auto`}
-                                onClick={commitEdit}
+                                className={`w-full h-11 whitespace-nowrap rounded-full border border-panel-strong px-6 text-base transition-all duration-300 ${EASE_CURVE} dark:border-gh-border sm:w-auto`}
+                                onClick={() => startEdit(event.id)}
                                 type="button"
                               >
-                                Save
+                                Edit time
                               </button>
-                            </>
-                          ) : (
+                            )}
                             <button
-                              className={`w-full h-11 whitespace-nowrap rounded-full border border-panel-strong px-6 text-base transition-all duration-300 ${EASE_CURVE} dark:border-gh-border sm:w-auto`}
-                              onClick={() => startEdit(event.id)}
+                              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-panel-strong text-muted transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:text-gh-muted`}
+                              onClick={() => deleteEvent(event.id)}
                               type="button"
+                              aria-label="Delete log"
                             >
-                              Edit time
+                              <Trash2 className="h-4 w-4" />
                             </button>
-                          )}
-                          <button
-                            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-panel-strong text-muted transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:text-gh-muted`}
-                            onClick={() => deleteEvent(event.id)}
-                            type="button"
-                            aria-label="Delete log"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            )}
-            {eventCount > 2 ? (
-              <button
-                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-full border border-panel-strong px-4 py-3 text-sm dark:border-gh-border"
-                onClick={() => setEventLogModalOpen(true)}
-                type="button"
-              >
-                <ChevronDown className="h-4 w-4" />
-                See full log
-              </button>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {eventCount > 2 ? (
+                <button
+                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-full border border-panel-strong px-4 py-3 text-sm dark:border-gh-border"
+                  onClick={() => setEventLogModalOpen(true)}
+                  type="button"
+                >
+                  <ChevronDown className="h-4 w-4" />
+                  See full log
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 xl:col-span-2">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="flex items-center gap-2 font-display text-2xl">
+              <Clock className="h-6 w-6 text-accent dark:text-gh-accent" />
+              What's coming up
+            </h2>
+            {predictionsUpdatedAt ? (
+              <span className="rounded-full border border-panel-strong px-3 py-1 text-xs uppercase tracking-[0.08em] text-muted dark:border-gh-border dark:text-gh-muted">
+                Updated {predictionsUpdatedAt}
+              </span>
             ) : null}
           </div>
-        </div>
-      </section>
-
-      <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 xl:col-span-2">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="flex items-center gap-2 font-display text-2xl">
-            <Clock className="h-6 w-6 text-accent dark:text-gh-accent" />
-            What's coming up
-          </h2>
-          {predictionsUpdatedAt ? (
-            <span className="rounded-full border border-panel-strong px-3 py-1 text-xs uppercase tracking-[0.08em] text-muted dark:border-gh-border dark:text-gh-muted">
-              Updated {predictionsUpdatedAt}
-            </span>
-          ) : null}
-        </div>
-        <div className="mt-2 text-sm text-muted dark:text-gh-muted">
-          Updates after each log.
-        </div>
-        <div className="mt-4 flex h-full max-h-full flex-col rounded-2xl bg-white p-5 dark:bg-gh-surface-2">
-          {nextThreeTimeline.length === 0 ? (
-            <div className="flex h-full items-center gap-3 text-sm text-muted dark:text-gh-muted">
-              <div className="h-10 w-40 animate-pulse rounded-full bg-panel-strong dark:bg-gh-border" />
-              Calculating...
-            </div>
-          ) : (
-            <>
-              <div className="text-xs uppercase tracking-[0.2em] text-muted dark:text-gh-muted">
-                Now
+          <div className="mt-2 text-sm text-muted dark:text-gh-muted">
+            Updates after each log.
+          </div>
+          <div className="mt-4 flex h-full max-h-full flex-col rounded-2xl bg-white p-5 dark:bg-gh-surface-2">
+            {nextThreeTimeline.length === 0 ? (
+              <div className="flex h-full items-center gap-3 text-sm text-muted dark:text-gh-muted">
+                <div className="h-10 w-40 animate-pulse rounded-full bg-panel-strong dark:bg-gh-border" />
+                Calculating...
               </div>
-              <div className="mt-3 grid grid-cols-1 gap-4 overflow-hidden pr-2 transition-all duration-300 xl:grid-cols-3">
-                {visibleUpcoming.map((item) => {
-                  const minutes = Math.max(
-                    0,
-                    Math.ceil((item.effectiveTimeUtc - nowUtcMs) / MS_MIN)
-                  );
-                  const showStatus = minutes <= 0;
-                  const upcomingIcon =
-                    item.id === "expected-wake" ? (
-                      <SunHorizon className="h-5 w-5 text-accent dark:text-gh-accent" />
-                    ) : item.id === "morning-feed" ? (
-                      <Baby className="h-5 w-5 text-accent dark:text-gh-accent" />
-                    ) : item.id === "next-feed" ? (
-                      <Baby className="h-5 w-5 text-accent dark:text-gh-accent" />
-                    ) : item.id === "nap-window" ? (
-                      <MoonStars className="h-5 w-5 text-accent dark:text-gh-accent" />
-                    ) : (
-                      <Sparkle className="h-5 w-5 text-accent dark:text-gh-accent" />
+            ) : (
+              <>
+                <div className="text-xs uppercase tracking-[0.2em] text-muted dark:text-gh-muted">
+                  Now
+                </div>
+                <div className="mt-3 grid grid-cols-1 gap-4 overflow-hidden pr-2 transition-all duration-300 xl:grid-cols-3">
+                  {visibleUpcoming.map((item) => {
+                    const minutes = Math.max(
+                      0,
+                      Math.ceil((item.effectiveTimeUtc - nowUtcMs) / MS_MIN)
                     );
-                  return (
-                    <button
-                      key={item.id}
-                      className={`w-full rounded-2xl border border-allowed/40 bg-white p-5 text-left transition-all duration-300 ${EASE_CURVE} fade-in dark:border-allowed/30 dark:bg-gh-surface-2 ${
-                        selectedUpcomingId === item.id ? "ring-2 ring-accent/30" : ""
-                      }`}
-                      onClick={() =>
-                        setSelectedUpcomingId(selectedUpcomingId === item.id ? null : item.id)
-                      }
-                      type="button"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          {upcomingIcon}
-                          <div>
-                            <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-                              {showStatus ? currentStatus : `in ${formatCountdown(minutes)}`}
-                            </div>
-                            <div className="mt-2 text-2xl font-semibold text-ink dark:text-gh-text">
-                              {item.label}
-                            </div>
-                            <div className="mt-2 text-lg font-semibold text-accent dark:text-gh-accent">
-                              {item.rangeEndUtc
-                                ? `${formatTimeZoned(item.timeUtc, timeZone)} – ${formatTimeZoned(
+                    const showStatus = minutes <= 0;
+                      const upcomingIcon =
+                        item.label === "Expected wake" ? (
+                          <SunHorizon className="h-5 w-5 text-accent dark:text-gh-accent" />
+                        ) : item.type === "milk" ? (
+                          <Baby className="h-5 w-5 text-accent dark:text-gh-accent" />
+                        ) : item.type === "nap" ? (
+                          <MoonStars className="h-5 w-5 text-accent dark:text-gh-accent" />
+                        ) : (
+                          <Sparkle className="h-5 w-5 text-accent dark:text-gh-accent" />
+                        );
+                    return (
+                      <button
+                        key={item.id}
+                        className={`w-full rounded-2xl border border-allowed/40 bg-white p-5 text-left transition-all duration-300 ${EASE_CURVE} fade-in dark:border-allowed/30 dark:bg-gh-surface-2 ${selectedUpcomingId === item.id ? "ring-2 ring-accent/30" : ""
+                          }`}
+                        onClick={() =>
+                          setSelectedUpcomingId(selectedUpcomingId === item.id ? null : item.id)
+                        }
+                        type="button"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            {upcomingIcon}
+                            <div>
+                              <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                                {showStatus ? currentStatus : `in ${formatCountdown(minutes)}`}
+                              </div>
+                              <div className="mt-2 text-2xl font-semibold text-ink dark:text-gh-text">
+                                {item.label}
+                              </div>
+                              <div className="mt-2 text-lg font-semibold text-accent dark:text-gh-accent">
+                                {item.rangeEndUtc
+                                  ? `${formatTimeZoned(item.timeUtc, timeZone)} – ${formatTimeZoned(
                                     item.rangeEndUtc,
                                     timeZone
                                   )}`
-                                : formatTimeZoned(item.timeUtc, timeZone)}
+                                  : formatTimeZoned(item.timeUtc, timeZone)}
+                              </div>
                             </div>
                           </div>
+                          <Sparkle className="h-4 w-4 text-accent dark:text-gh-accent" />
                         </div>
-                        <Sparkle className="h-4 w-4 text-accent dark:text-gh-accent" />
-                      </div>
-                      {selectedUpcomingId === item.id ? (
-                        <div className="mt-3 text-sm text-ink dark:text-gh-text">{item.prep}</div>
-                      ) : null}
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </div>
-        {nextThreeTimeline.length > rowsPerView ? (
-          <div className="mt-auto pt-4 flex w-full flex-col gap-2">
-            <button
-              className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-panel-strong px-4 py-3 text-sm dark:border-gh-border"
-              type="button"
-              onClick={() =>
-                setUpcomingRowsToShow((prev) => Math.min(maxUpcomingRows, prev + 1))
-              }
-              disabled={!canShowMoreUpcoming}
-            >
-              <ChevronDown className="h-4 w-4" />
-              {canShowMoreUpcoming ? "Show more" : "All shown"}
-            </button>
-            {upcomingRowsToShow > 1 ? (
+                        {selectedUpcomingId === item.id ? (
+                          <div className="mt-3 text-sm text-ink dark:text-gh-text">{item.prep}</div>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+          {nextThreeTimeline.length > rowsPerView ? (
+            <div className="mt-auto pt-4 flex w-full flex-col gap-2">
               <button
                 className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-panel-strong px-4 py-3 text-sm dark:border-gh-border"
                 type="button"
-                onClick={() => setUpcomingRowsToShow(1)}
+                onClick={() =>
+                  setUpcomingRowsToShow((prev) => Math.min(maxUpcomingRows, prev + 1))
+                }
+                disabled={!canShowMoreUpcoming}
               >
-                Collapse
+                <ChevronDown className="h-4 w-4" />
+                {canShowMoreUpcoming ? "Show more" : "All shown"}
               </button>
-            ) : null}
-            {nextThreeTimeline.some((item) => item.label === "Nap window") ? (
-              <div className="text-xs text-muted dark:text-gh-muted">
-                Extra nap available if needed.
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </section>
+              {upcomingRowsToShow > 1 ? (
+                <button
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-panel-strong px-4 py-3 text-sm dark:border-gh-border"
+                  type="button"
+                  onClick={() => setUpcomingRowsToShow(1)}
+                >
+                  Collapse
+                </button>
+              ) : null}
+              {nextThreeTimeline.some((item) => item.label === "Nap window") ? (
+                <div className="text-xs text-muted dark:text-gh-muted">
+                  Extra nap available if needed.
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </section>
 
-      <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
-        <h2 className="flex items-center gap-2 font-display text-2xl">
-          <Activity className="h-6 w-6 text-accent dark:text-gh-accent" />
-          Right now
-        </h2>
-        <ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {outputs.stateSummary.map((item, index) => (
-            <li
-              key={`${item}-${index}`}
-              className="rounded-xl bg-white p-5 text-base font-medium dark:bg-gh-surface-2"
-            >
-              <div className="flex items-center gap-3">
-                {getStateIcon(item)}
-                <span>{item}</span>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </section>
+        <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
+          <h2 className="flex items-center gap-2 font-display text-2xl">
+            <Activity className="h-6 w-6 text-accent dark:text-gh-accent" />
+            Right now
+          </h2>
+          <ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {outputs.stateSummary.map((item, index) => (
+              <li
+                key={`${item}-${index}`}
+                className="rounded-xl bg-white p-5 text-base font-medium dark:bg-gh-surface-2"
+              >
+                <div className="flex items-center gap-3">
+                  {getStateIcon(item)}
+                  <span>{item}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
 
-      <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
-        <h2 className="flex items-center gap-2 font-display text-2xl">
-          <Sparkle className="h-6 w-6 text-accent dark:text-gh-accent" />
-          Routine activity
-        </h2>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <div className="rounded-xl bg-white p-5 text-base font-medium dark:bg-gh-surface-2">
-            <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-              Longest routine
+        <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
+          <h2 className="flex items-center gap-2 font-display text-2xl">
+            <Sparkle className="h-6 w-6 text-accent dark:text-gh-accent" />
+            Routine activity
+          </h2>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl bg-white p-5 text-base font-medium dark:bg-gh-surface-2">
+              <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                Longest routine
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-ink dark:text-gh-text">
+                {longestRoutine !== null ? formatCountdown(longestRoutine) : "—"}
+              </div>
             </div>
-            <div className="mt-2 text-2xl font-semibold text-ink dark:text-gh-text">
-              {longestRoutine !== null ? formatCountdown(longestRoutine) : "—"}
+            <div className="rounded-xl bg-white p-5 text-base font-medium dark:bg-gh-surface-2">
+              <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                Shortest routine
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-ink dark:text-gh-text">
+                {shortestRoutine !== null ? formatCountdown(shortestRoutine) : "—"}
+              </div>
             </div>
           </div>
-          <div className="rounded-xl bg-white p-5 text-base font-medium dark:bg-gh-surface-2">
-            <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-              Shortest routine
-            </div>
-            <div className="mt-2 text-2xl font-semibold text-ink dark:text-gh-text">
-              {shortestRoutine !== null ? formatCountdown(shortestRoutine) : "—"}
-            </div>
-          </div>
-        </div>
-      </section>
+        </section>
 
       </div>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-2">
-      <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 xl:col-span-2">
-        <h2 className="flex items-center gap-2 font-display text-2xl">
-          <AlarmClock className="h-6 w-6 text-accent dark:text-gh-accent" />
-          Next steps
-        </h2>
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-          <div className="rounded-2xl bg-white p-5 dark:bg-gh-surface-2">
-            <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-              Next chance
-            </div>
-            <div className="mt-3 flex flex-wrap items-baseline gap-3">
-              {outputs.isAsleep ? (
-                <span className="text-4xl font-semibold text-ink dark:text-gh-text">
-                  Expected wake
-                </span>
-              ) : nextWindowCountdown !== null ? (
-                <span className="text-4xl font-semibold text-ink dark:text-gh-text">
-                  {nextWindowCountdown === 0 ? currentStatus : formatCountdown(nextWindowCountdown)}
-                </span>
-              ) : (
-                <span className="text-2xl font-semibold text-muted dark:text-gh-muted animate-pulse">
-                  Calculating...
-                </span>
-              )}
-              {!outputs.isAsleep && outputs.nextWindowStartUtc ? (
-                <span className="text-sm text-muted dark:text-gh-muted">
-                  starts {formatTimeZoned(outputs.nextWindowStartUtc, timeZone)}
-                </span>
+        <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 xl:col-span-2">
+          <h2 className="flex items-center gap-2 font-display text-2xl">
+            <AlarmClock className="h-6 w-6 text-accent dark:text-gh-accent" />
+            Next steps
+          </h2>
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <div className="rounded-2xl bg-white p-5 dark:bg-gh-surface-2">
+              <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                Next chance
+              </div>
+              <div className="mt-3 flex flex-wrap items-baseline gap-3">
+                {outputs.isAsleep ? (
+                  <span className="text-4xl font-semibold text-ink dark:text-gh-text">
+                    Expected wake
+                  </span>
+                ) : nextWindowCountdown !== null ? (
+                  <span className="text-4xl font-semibold text-ink dark:text-gh-text">
+                    {nextWindowCountdown === 0 ? currentStatus : formatCountdown(nextWindowCountdown)}
+                  </span>
+                ) : (
+                  <span className="text-2xl font-semibold text-muted dark:text-gh-muted animate-pulse">
+                    Calculating...
+                  </span>
+                )}
+                {!outputs.isAsleep && outputs.nextWindowStartUtc ? (
+                  <span className="text-sm text-muted dark:text-gh-muted">
+                    starts {formatTimeZoned(outputs.nextWindowStartUtc, timeZone)}
+                  </span>
+                ) : null}
+              </div>
+              {outputs.isAsleep && effectiveExpectedWakeUtc ? (
+                <div className="mt-2 text-sm text-muted dark:text-gh-muted">
+                  {expectedWakeCountdown !== null
+                    ? `Expected wake in ${formatCountdown(expectedWakeCountdown)}`
+                    : `Expected wake ${formatTimeZoned(effectiveExpectedWakeUtc, timeZone)}`}
+                </div>
+              ) : null}
+              {outputs.isAsleep && effectiveExpectedWakeUtc ? (
+                <div className="mt-1 text-sm text-muted dark:text-gh-muted">
+                  Next: Morning feed and the first wake window.
+                </div>
+              ) : null}
+              {!outputs.isAsleep ? (
+                <div className="mt-4 border-t border-panel-strong pt-3 dark:border-gh-border">
+                  <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                    OK now
+                  </div>
+                  <ul className="mt-2 grid gap-2">
+                    {outputs.windowCategories.allowed.map((item) => (
+                      <li key={item} className="flex items-center gap-2 text-allowed">
+                        <StatusIcon variant="allowed" />
+                        <span className="text-sm text-ink dark:text-gh-text">{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-3 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                    Skip for now
+                  </div>
+                  <ul className="mt-2 grid gap-2">
+                    {outputs.windowCategories.suppressed.map((item) => (
+                      <li key={item} className="flex items-center gap-2 text-suppressed">
+                        <StatusIcon variant="suppressed" />
+                        <span className="text-sm text-ink dark:text-gh-text">{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-3 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                    Recommended activities
+                  </div>
+                  <ul className="mt-2 grid gap-2">
+                    {outputs.activityCategories.allowed.map((item) => (
+                      <li key={item.label} className="flex items-center gap-2 text-allowed">
+                        <StatusIcon variant="allowed" />
+                        <span className="text-sm text-ink dark:text-gh-text">{item.label}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ) : null}
             </div>
-            {outputs.isAsleep && effectiveExpectedWakeUtc ? (
-              <div className="mt-2 text-sm text-muted dark:text-gh-muted">
-                {expectedWakeCountdown !== null
-                  ? `Expected wake in ${formatCountdown(expectedWakeCountdown)}`
-                  : `Expected wake ${formatTimeZoned(effectiveExpectedWakeUtc, timeZone)}`}
-              </div>
-            ) : null}
-            {outputs.isAsleep && effectiveExpectedWakeUtc ? (
-              <div className="mt-1 text-sm text-muted dark:text-gh-muted">
-                Next: Morning feed and the first wake window.
-              </div>
-            ) : null}
-          {!outputs.isAsleep ? (
-            <div className="mt-4 border-t border-panel-strong pt-3 dark:border-gh-border">
-              <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-                OK now
-              </div>
-              <ul className="mt-2 grid gap-2">
-                {outputs.windowCategories.allowed.map((item) => (
-                  <li key={item} className="flex items-center gap-2 text-allowed">
-                    <StatusIcon variant="allowed" />
-                    <span className="text-sm text-ink dark:text-gh-text">{item}</span>
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-3 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-                Skip for now
-              </div>
-              <ul className="mt-2 grid gap-2">
-                {outputs.windowCategories.suppressed.map((item) => (
-                  <li key={item} className="flex items-center gap-2 text-suppressed">
-                    <StatusIcon variant="suppressed" />
-                    <span className="text-sm text-ink dark:text-gh-text">{item}</span>
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-3 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-                Recommended activities
-              </div>
-              <ul className="mt-2 grid gap-2">
-                {outputs.activityCategories.allowed.map((item) => (
-                  <li key={item.label} className="flex items-center gap-2 text-allowed">
-                    <StatusIcon variant="allowed" />
-                    <span className="text-sm text-ink dark:text-gh-text">{item.label}</span>
-                  </li>
-                ))}
-              </ul>
+            <div className="rounded-2xl bg-white p-5 text-sm text-muted dark:bg-gh-surface-2 dark:text-gh-muted">
+              —
             </div>
-          ) : null}
-        </div>
-        <div className="rounded-2xl bg-white p-5 text-sm text-muted dark:bg-gh-surface-2 dark:text-gh-muted">
-          —
-        </div>
-      </div>
-        <div className="mt-4 flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted dark:text-gh-muted">
-          <div className="h-px flex-1 bg-panel-strong dark:bg-gh-border" />
-          <ChevronDown className="h-4 w-4" />
-          <span>Today's log</span>
-          <div className="h-px flex-1 bg-panel-strong dark:bg-gh-border" />
-        </div>
-      </section>
+          </div>
+          <div className="mt-4 flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted dark:text-gh-muted">
+            <div className="h-px flex-1 bg-panel-strong dark:bg-gh-border" />
+            <ChevronDown className="h-4 w-4" />
+            <span>Today's log</span>
+            <div className="h-px flex-1 bg-panel-strong dark:bg-gh-border" />
+          </div>
+        </section>
 
-      <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 xl:col-span-2">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="flex items-center gap-2 font-display text-2xl">
-            <Gauge className="h-6 w-6 text-accent dark:text-gh-accent" />
-            Time until wake
-          </h2>
-          <button
-            className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted"
-            type="button"
-            onClick={() => setWakeInfoOpen(true)}
-          >
-            <Info className="h-4 w-4" />
-            Info
-          </button>
-        </div>
-        <div className="mt-4 rounded-2xl bg-white p-5 dark:bg-gh-surface-2">
-          <div className="flex flex-wrap items-center gap-4">
-            <div
-              className={`text-4xl font-semibold ${
-                outputs.pressureIndicator.regulationRisk === "high"
-                  ? "text-suppressed"
-                  : outputs.pressureIndicator.regulationRisk === "rising"
-                  ? "text-warning"
-                  : "text-allowed"
-              } ${wakeRemaining === null && !outputs.isAsleep ? "animate-pulse" : ""}`}
+        <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 xl:col-span-2">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="flex items-center gap-2 font-display text-2xl">
+              <Gauge className="h-6 w-6 text-accent dark:text-gh-accent" />
+              Time until wake
+            </h2>
+            <button
+              className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted"
+              type="button"
+              onClick={() => setWakeInfoOpen(true)}
             >
+              <Info className="h-4 w-4" />
+              Info
+            </button>
+          </div>
+          <div className="mt-4 rounded-2xl bg-white p-5 dark:bg-gh-surface-2">
+            <div className="flex flex-wrap items-center gap-4">
+              <div
+                className={`text-4xl font-semibold ${outputs.pressureIndicator.regulationRisk === "high"
+                    ? "text-suppressed"
+                    : outputs.pressureIndicator.regulationRisk === "rising"
+                      ? "text-warning"
+                      : "text-allowed"
+                  } ${wakeRemaining === null && !outputs.isAsleep ? "animate-pulse" : ""}`}
+              >
+                {outputs.isAsleep
+                  ? expectedWakeCountdown !== null
+                    ? `Wake in ${formatCountdown(expectedWakeCountdown)}`
+                    : "Wake in —"
+                  : wakeRemaining !== null
+                    ? wakeRemaining === 0 && outputs.pressureIndicator.regulationRisk === "high"
+                      ? "Overtired"
+                      : `${wakeRemaining} min remaining`
+                    : "Calculating..."}
+              </div>
+              {outputs.isAsleep ? (
+                <MoonStars className="h-6 w-6 text-accent dark:text-gh-accent" />
+              ) : null}
+              {!outputs.isAsleep && outputs.pressureIndicator.regulationRisk !== "low" ? (
+                <AlertTriangle
+                  className={`h-6 w-6 ${outputs.pressureIndicator.regulationRisk === "high"
+                      ? "text-suppressed"
+                      : "text-warning"
+                    }`}
+                />
+              ) : null}
+            </div>
+            <div className="mt-2 text-sm text-muted dark:text-gh-muted">
               {outputs.isAsleep
                 ? expectedWakeCountdown !== null
-                  ? `Wake in ${formatCountdown(expectedWakeCountdown)}`
-                  : "Wake in —"
-                : wakeRemaining !== null
-                ? wakeRemaining === 0 && outputs.pressureIndicator.regulationRisk === "high"
-                  ? "Overtired"
-                  : `${wakeRemaining} min remaining`
-                : "Calculating..."}
+                  ? `Expected wake in ${formatCountdown(expectedWakeCountdown)}`
+                  : "Expected wake time pending"
+                : outputs.pressureIndicator.regulationRisk === "high"
+                  ? wakeRemaining === 0
+                    ? "Overtired window"
+                    : "Approaching overtired window"
+                  : outputs.pressureIndicator.regulationRisk === "rising"
+                    ? "Window tightening"
+                    : "Window stable"}
             </div>
-            {outputs.isAsleep ? (
-              <MoonStars className="h-6 w-6 text-accent dark:text-gh-accent" />
-            ) : null}
-            {!outputs.isAsleep && outputs.pressureIndicator.regulationRisk !== "low" ? (
-              <AlertTriangle
-                className={`h-6 w-6 ${
-                  outputs.pressureIndicator.regulationRisk === "high"
-                    ? "text-suppressed"
-                    : "text-warning"
-                }`}
-              />
-            ) : null}
-          </div>
-          <div className="mt-2 text-sm text-muted dark:text-gh-muted">
-            {outputs.isAsleep
-              ? expectedWakeCountdown !== null
-                ? `Expected wake in ${formatCountdown(expectedWakeCountdown)}`
-                : "Expected wake time pending"
-              : outputs.pressureIndicator.regulationRisk === "high"
-              ? wakeRemaining === 0
-                ? "Overtired window"
-                : "Approaching overtired window"
-              : outputs.pressureIndicator.regulationRisk === "rising"
-              ? "Window tightening"
-              : "Window stable"}
-          </div>
-          <div className="mt-4">
-            <div className="relative h-8 rounded-full bg-panel-strong dark:bg-gh-border">
-              <div className="absolute inset-0 grid grid-cols-3 gap-2 px-2">
-                <div className="rounded-full bg-allowed/40" />
-                <div className="rounded-full bg-warning/40" />
-                <div className="rounded-full bg-suppressed/40" />
+            <div className="mt-4">
+              <div className="relative h-8 rounded-full bg-panel-strong dark:bg-gh-border">
+                <div className="absolute inset-0 grid grid-cols-3 gap-2 px-2">
+                  <div className="rounded-full bg-allowed/40" />
+                  <div className="rounded-full bg-warning/40" />
+                  <div className="rounded-full bg-suppressed/40" />
+                </div>
+                {outputs.isAsleep && sleepProgressPct !== null ? (
+                  <div
+                    className={`absolute top-1/2 h-8 w-8 -translate-y-1/2 rounded-full border-2 border-white bg-ink transition-all duration-500 ${EASE_CURVE} dark:border-gh-surface dark:bg-gh-text`}
+                    style={{ left: `calc(${sleepProgressPct}% - 16px)` }}
+                  />
+                ) : wakePct !== null ? (
+                  <div
+                    className={`absolute top-1/2 h-8 w-8 -translate-y-1/2 rounded-full border-2 border-white bg-ink transition-all duration-500 ${EASE_CURVE} dark:border-gh-surface dark:bg-gh-text`}
+                    style={{ left: `calc(${wakePct}% - 16px)` }}
+                  />
+                ) : null}
               </div>
-              {outputs.isAsleep && sleepProgressPct !== null ? (
-                <div
-                  className={`absolute top-1/2 h-8 w-8 -translate-y-1/2 rounded-full border-2 border-white bg-ink transition-all duration-500 ${EASE_CURVE} dark:border-gh-surface dark:bg-gh-text`}
-                  style={{ left: `calc(${sleepProgressPct}% - 16px)` }}
-                />
-              ) : wakePct !== null ? (
-                <div
-                  className={`absolute top-1/2 h-8 w-8 -translate-y-1/2 rounded-full border-2 border-white bg-ink transition-all duration-500 ${EASE_CURVE} dark:border-gh-surface dark:bg-gh-text`}
-                  style={{ left: `calc(${wakePct}% - 16px)` }}
-                />
-              ) : null}
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 xl:col-span-2">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="flex items-center gap-2 font-display text-2xl">
-            <Layers3 className="h-6 w-6 text-accent dark:text-gh-accent" />
-            Today's pattern
-          </h2>
-          <button
-            className="inline-flex items-center gap-2 rounded-full border border-panel-strong px-4 py-2 text-sm dark:border-gh-border"
-            onClick={() => setShiftExpanded(!shiftExpanded)}
-            type="button"
-          >
-            {shiftExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            {shiftExpanded ? "Collapse" : "Expand"}
-          </button>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-panel-strong bg-accent-soft px-4 py-3 text-sm dark:border-gh-border dark:bg-gh-surface-2">
-          <Sparkle className="h-4 w-4 text-accent dark:text-gh-accent" />
-          <span className="text-ink dark:text-gh-text">
-            Updated {shiftUpdatedAt} based on {eventCount} logged events
-          </span>
-        </div>
-        {shiftExpanded ? (
-          <ul className="mt-4 flex flex-col gap-3 fade-in">
-            {historyDelta ? (
-              <li className="flex items-center gap-3 rounded-xl border border-accent/40 bg-accent-soft px-4 py-3 text-sm font-semibold text-ink dark:border-gh-accent/50 dark:bg-gh-surface-2 dark:text-gh-text">
-                <span className="text-xs text-accent">●</span>
-                <span>{historyDelta}</span>
-              </li>
-            ) : null}
-            {outputs.shiftPreview.map((item) => (
-              <li
-                key={item.delta}
-                className={`flex items-center gap-3 rounded-xl border border-panel-strong px-4 py-3 text-sm dark:border-gh-border ${
-                  item.status === "applied"
-                    ? "bg-white text-ink dark:bg-gh-surface-2 dark:text-gh-text font-semibold"
-                    : "bg-white/70 text-muted dark:bg-gh-surface-2 dark:text-gh-muted"
-                }`}
-              >
-                <span
-                  className={`text-xs ${
-                    item.status === "applied" ? "text-accent" : "text-muted"
-                  }`}
-                >
-                  ●
-                </span>
-                <span>{item.delta}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div className="mt-4 text-sm text-muted dark:text-gh-muted">
-            {hasInsights ? "Insights ready." : "No new shifts yet."}
+        <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 xl:col-span-2">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="flex items-center gap-2 font-display text-2xl">
+              <Layers3 className="h-6 w-6 text-accent dark:text-gh-accent" />
+              Today's pattern
+            </h2>
+            <button
+              className="inline-flex items-center gap-2 rounded-full border border-panel-strong px-4 py-2 text-sm dark:border-gh-border"
+              onClick={() => setShiftExpanded(!shiftExpanded)}
+              type="button"
+            >
+              {shiftExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              {shiftExpanded ? "Collapse" : "Expand"}
+            </button>
           </div>
-        )}
-      </section>
+          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-panel-strong bg-accent-soft px-4 py-3 text-sm dark:border-gh-border dark:bg-gh-surface-2">
+            <Sparkle className="h-4 w-4 text-accent dark:text-gh-accent" />
+            <span className="text-ink dark:text-gh-text">
+              Updated {shiftUpdatedAt} based on {eventCount} logged events
+            </span>
+          </div>
+          {shiftExpanded ? (
+            <ul className="mt-4 flex flex-col gap-3 fade-in">
+              {historyDelta ? (
+                <li className="flex items-center gap-3 rounded-xl border border-accent/40 bg-accent-soft px-4 py-3 text-sm font-semibold text-ink dark:border-gh-accent/50 dark:bg-gh-surface-2 dark:text-gh-text">
+                  <span className="text-xs text-accent">●</span>
+                  <span>{historyDelta}</span>
+                </li>
+              ) : null}
+              {outputs.shiftPreview.map((item) => (
+                <li
+                  key={item.delta}
+                  className={`flex items-center gap-3 rounded-xl border border-panel-strong px-4 py-3 text-sm dark:border-gh-border ${item.status === "applied"
+                      ? "bg-white text-ink dark:bg-gh-surface-2 dark:text-gh-text font-semibold"
+                      : "bg-white/70 text-muted dark:bg-gh-surface-2 dark:text-gh-muted"
+                    }`}
+                >
+                  <span
+                    className={`text-xs ${item.status === "applied" ? "text-accent" : "text-muted"
+                      }`}
+                  >
+                    ●
+                  </span>
+                  <span>{item.delta}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="mt-4 text-sm text-muted dark:text-gh-muted">
+              {hasInsights ? "Insights ready." : "No new shifts yet."}
+            </div>
+          )}
+        </section>
 
       </div>
 
@@ -1399,31 +1344,31 @@ export default function App() {
             onClick={() => setEventLogModalOpen(false)}
           />
           <div className="relative w-full max-w-3xl rounded-2xl border border-panel-strong bg-white p-6 shadow-panel dark:border-gh-border dark:bg-gh-surface dark:shadow-panel-dark">
-          <div className="flex items-center justify-between gap-3">
-            <h3 className="text-xl font-semibold text-ink dark:text-gh-text">Full log</h3>
-            <div className="flex items-center gap-2">
-              <span className="min-w-[44px] pl-1 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
-                Sort
-              </span>
-              <div className="relative">
-                <select
-                  className="appearance-none rounded-full border border-panel-strong bg-white px-3 py-2 pr-10 text-sm dark:border-gh-border dark:bg-gh-surface"
-                  value={eventLogSort}
-                  onChange={(eventTarget) =>
-                    setEventLogSort(eventTarget.target.value as "latest" | "oldest")
-                  }
-                >
-                  <option value="latest">Latest</option>
-                  <option value="oldest">Oldest</option>
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted dark:text-gh-muted" />
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-xl font-semibold text-ink dark:text-gh-text">Full log</h3>
+              <div className="flex items-center gap-2">
+                <span className="min-w-[44px] pl-1 text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
+                  Sort
+                </span>
+                <div className="relative">
+                  <select
+                    className="appearance-none rounded-full border border-panel-strong bg-white px-3 py-2 pr-10 text-sm dark:border-gh-border dark:bg-gh-surface"
+                    value={eventLogSort}
+                    onChange={(eventTarget) =>
+                      setEventLogSort(eventTarget.target.value as "latest" | "oldest")
+                    }
+                  >
+                    <option value="latest">Latest</option>
+                    <option value="oldest">Oldest</option>
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted dark:text-gh-muted" />
+                </div>
               </div>
-            </div>
-            <button
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-panel-strong text-muted dark:border-gh-border dark:text-gh-muted"
-              type="button"
-              aria-label="Close"
-              onClick={() => setEventLogModalOpen(false)}
+              <button
+                className="flex h-10 w-10 items-center justify-center rounded-full border border-panel-strong text-muted dark:border-gh-border dark:text-gh-muted"
+                type="button"
+                aria-label="Close"
+                onClick={() => setEventLogModalOpen(false)}
               >
                 <X className="h-4 w-4" />
               </button>
