@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Activity,
   AlarmClock,
@@ -431,13 +431,20 @@ export default function App() {
     if (state.eventLog.length === 0) return [];
 
     if (outputs.isAsleep) {
-      if (!outputs.expectedWakeUtc) return [];
+      const expectedWakeOverride =
+        state.eventLog
+          .filter((event) => event.type === "FirstAwake")
+          .map((event) => Date.parse(event.timestampUtc))
+          .filter((timestamp) => !Number.isNaN(timestamp) && timestamp > nowUtcMs)
+          .sort((a, b) => a - b)[0] ?? null;
+      const expectedWakeTime = expectedWakeOverride ?? outputs.expectedWakeUtc;
+      if (!expectedWakeTime) return [];
       return [
         makePredictedEvent({
           id: "expected-wake",
           type: "bedtime" as const,
           label: "Expected wake",
-          timeUtc: outputs.expectedWakeUtc,
+          timeUtc: expectedWakeTime,
           prep: "Start the day",
         }),
       ];
@@ -502,12 +509,20 @@ export default function App() {
       .pop() ?? null;
   const loggedAsleep = lastRealLog?.event.type === "Asleep";
   const predictedEvents = buildPredictedEvents();
+  const futureFirstAwakeUtc =
+    state.eventLog
+      .filter((event) => event.type === "FirstAwake")
+      .map((event) => Date.parse(event.timestampUtc))
+      .filter((timestamp) => !Number.isNaN(timestamp) && timestamp > nowUtcMs)
+      .sort((a, b) => a - b)[0] ?? null;
   const predictedExpectedWakeUtc =
     outputs.isAsleep
       ? predictedEvents.find((event) => event.label === "Expected wake")?.timeUtc ?? null
       : null;
   const effectiveExpectedWakeUtc =
-    outputs.isAsleep && predictedExpectedWakeUtc ? predictedExpectedWakeUtc : outputs.expectedWakeUtc;
+    outputs.isAsleep && (futureFirstAwakeUtc || predictedExpectedWakeUtc)
+      ? (futureFirstAwakeUtc ?? predictedExpectedWakeUtc)
+      : outputs.expectedWakeUtc;
   const expectedWakeCountdown =
     effectiveExpectedWakeUtc !== null
       ? Math.max(0, Math.ceil((effectiveExpectedWakeUtc - nowUtcMs) / MS_MIN))
@@ -544,7 +559,8 @@ export default function App() {
           ? "NapStarted"
           : "Asleep"
     : null;
-  const upNextType = outputs.isAsleep ? "FirstAwake" : resolvedUpNextType;
+  const upNextType =
+    outputs.isAsleep && futureFirstAwakeUtc ? "MilkGiven" : outputs.isAsleep ? "FirstAwake" : resolvedUpNextType;
   const orderedEvents = (() => {
     const base = [...EVENT_TYPES];
     if (!canLog.FirstAwake) {
@@ -590,6 +606,31 @@ export default function App() {
     });
     return groups;
   })();
+
+  const activityListRef = useRef<HTMLDivElement | null>(null);
+  const prevLogSignatureRef = useRef<string>("");
+  const logSignature = state.eventLog
+    .map((event) => `${event.id}:${event.timestampUtc}:${event.type}`)
+    .join("|");
+
+  useLayoutEffect(() => {
+    if (!activityListRef.current) return;
+    const currentSignature = `${logSignature}|${upNextType ?? "none"}`;
+    if (currentSignature === prevLogSignatureRef.current) return;
+    prevLogSignatureRef.current = currentSignature;
+    if (!orderedEvents[0]) return;
+    const target = activityListRef.current.querySelector<HTMLButtonElement>(
+      `[data-event-type="${orderedEvents[0].type}"]`
+    );
+    if (!target) return;
+    activityListRef.current?.scrollTo({ top: 0, behavior: "auto" });
+  }, [logSignature, orderedEvents, upNextType]);
+
+  useEffect(() => {
+    if (upNextType) {
+      setSelectedEvent(upNextType);
+    }
+  }, [upNextType]);
 
   const currentStatus = outputs.isAsleep
     ? "Sleeping"
@@ -755,7 +796,10 @@ export default function App() {
                 Log activity
               </h3>
               <div className="mt-3 relative">
-                <div className="h-[190px] snap-y snap-mandatory overflow-y-auto pr-2 space-y-3">
+                <div
+                  ref={activityListRef}
+                  className="h-[190px] snap-y snap-mandatory overflow-y-auto pr-2 space-y-3"
+                >
                   {orderedEvents.map((event) => {
                     const highlightRoutine =
                       event.type === "RoutineStarted" &&
@@ -766,6 +810,7 @@ export default function App() {
                     return (
                       <button
                         key={event.type}
+                        data-event-type={event.type}
                         className={`w-full min-h-[76px] snap-start rounded-2xl border px-5 py-4 text-left text-base transition-all duration-300 ${EASE_CURVE} ${selectedEvent === event.type
                             ? "border-accent bg-accent-soft dark:bg-gh-surface-2"
                             : "border-transparent bg-white dark:bg-gh-surface-2"
