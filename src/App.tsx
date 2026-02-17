@@ -904,8 +904,8 @@ export default function App() {
         </strong>
       </section>
 
-      <div className="mt-6 flex flex-col gap-6">
-        <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 flex flex-col">
+      <div className="mt-4 flex flex-col gap-4">
+        <section className="rounded-2xl bg-panel p-5 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface sm:p-6 flex flex-col">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="flex items-center gap-2 font-display text-2xl">
               <ClipboardList className="h-6 w-6 text-accent dark:text-gh-accent" />
@@ -955,7 +955,7 @@ export default function App() {
                         onClick={() => setSelectedEvent(event.type)}
                         type="button"
                       >
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                           <div className="flex items-center gap-3">
                             {EVENT_ICONS[event.type]}
                             <div>
@@ -966,7 +966,7 @@ export default function App() {
                             </div>
                           </div>
                           {isNext ? (
-                            <span className="rounded-full border border-accent px-3 py-1 text-xs uppercase tracking-[0.1em] text-accent">
+                            <span className="w-fit rounded-full border border-accent px-3 py-1 text-xs uppercase tracking-[0.1em] text-accent">
                               Up next
                             </span>
                           ) : null}
@@ -1035,7 +1035,7 @@ export default function App() {
                               </small>
                             </div>
                           </div>
-                          <div className="flex w-full items-center gap-2 sm:w-auto">
+                          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                             {editId === event.id ? (
                               <>
                                 <div className="flex w-full items-center gap-2 rounded-full border border-panel-strong bg-white px-4 py-3 shadow-[0_0_0_1px_rgba(0,0,0,0.02)] dark:border-gh-border dark:bg-gh-surface sm:w-auto">
@@ -1076,7 +1076,7 @@ export default function App() {
                               </button>
                             )}
                             <button
-                              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-panel-strong text-muted transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:text-gh-muted`}
+                              className={`flex h-11 w-full shrink-0 items-center justify-center rounded-full border border-panel-strong text-muted transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:text-gh-muted sm:w-11`}
                               onClick={() => deleteEvent(event.id)}
                               type="button"
                               aria-label="Delete log"
@@ -1104,7 +1104,7 @@ export default function App() {
           </div>
         </section>
 
-        <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 xl:col-span-2">
+        <section className="rounded-2xl bg-panel p-5 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface sm:p-6 xl:col-span-2">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="flex items-center gap-2 font-display text-2xl">
               <Clock className="h-6 w-6 text-accent dark:text-gh-accent" />
@@ -1119,7 +1119,7 @@ export default function App() {
           <div className="mt-2 text-sm text-muted dark:text-gh-muted">
             Updates after each log.
           </div>
-          <div className="mt-4 flex h-full max-h-full flex-col rounded-2xl bg-white p-5 dark:bg-gh-surface-2">
+          <div className="mt-3 flex h-full max-h-full flex-col">
             {nextThreeTimeline.length === 0 ? (
               <div className="flex h-full items-center gap-3 text-sm text-muted dark:text-gh-muted">
                 <div className="h-10 w-40 animate-pulse rounded-full bg-panel-strong dark:bg-gh-border" />
@@ -1130,7 +1130,7 @@ export default function App() {
                 <div className="text-xs uppercase tracking-[0.2em] text-muted dark:text-gh-muted">
                   Now
                 </div>
-                <div className="mt-3 grid grid-cols-1 gap-4 overflow-hidden pr-2 transition-all duration-300 xl:grid-cols-3">
+                <div className="mt-3 grid grid-cols-1 gap-3 overflow-hidden pr-1 transition-all duration-300 xl:grid-cols-3">
                   {visibleUpcoming.map((item) => {
                     const minutes = Math.max(
                       0,
@@ -1150,7 +1150,7 @@ export default function App() {
                     return (
                       <button
                         key={item.id}
-                        className={`w-full rounded-2xl border border-allowed/40 bg-white p-5 text-left transition-all duration-300 ${EASE_CURVE} fade-in dark:border-allowed/30 dark:bg-gh-surface-2 ${selectedUpcomingId === item.id ? "ring-2 ring-accent/30" : ""
+                        className={`w-full rounded-2xl border border-allowed/40 bg-white p-4 text-left transition-all duration-300 ${EASE_CURVE} fade-in dark:border-allowed/30 dark:bg-gh-surface-2 ${selectedUpcomingId === item.id ? "ring-2 ring-accent/30" : ""
                           }`}
                         onClick={() =>
                           setSelectedUpcomingId(selectedUpcomingId === item.id ? null : item.id)
@@ -1164,7 +1164,7 @@ export default function App() {
                               <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
                                 {showStatus ? currentStatus : `in ${formatCountdown(minutes)}`}
                               </div>
-                              <div className="mt-2 text-2xl font-semibold text-ink dark:text-gh-text">
+                              <div className="mt-2 text-xl font-semibold text-ink dark:text-gh-text sm:text-2xl">
                                 {item.label}
                               </div>
                               <div className="mt-2 text-lg font-semibold text-accent dark:text-gh-accent">
@@ -1220,7 +1220,7 @@ export default function App() {
           ) : null}
         </section>
 
-        <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
+        <section className="rounded-2xl bg-panel p-5 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface sm:p-6">
           <h2 className="flex items-center gap-2 font-display text-2xl">
             <Activity className="h-6 w-6 text-accent dark:text-gh-accent" />
             Right now
@@ -1240,7 +1240,7 @@ export default function App() {
           </ul>
         </section>
 
-        <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7">
+        <section className="rounded-2xl bg-panel p-5 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface sm:p-6">
           <h2 className="flex items-center gap-2 font-display text-2xl">
             <Sparkle className="h-6 w-6 text-accent dark:text-gh-accent" />
             Routine activity
@@ -1267,8 +1267,8 @@ export default function App() {
 
       </div>
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-2">
-        <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 xl:col-span-2">
+      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <section className="rounded-2xl bg-panel p-5 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface sm:p-6 xl:col-span-2">
           <h2 className="flex items-center gap-2 font-display text-2xl">
             <AlarmClock className="h-6 w-6 text-accent dark:text-gh-accent" />
             Next steps
@@ -1360,7 +1360,7 @@ export default function App() {
           </div>
         </section>
 
-        <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 xl:col-span-2">
+        <section className="rounded-2xl bg-panel p-5 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface sm:p-6 xl:col-span-2">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="flex items-center gap-2 font-display text-2xl">
               <Gauge className="h-6 w-6 text-accent dark:text-gh-accent" />
@@ -1375,7 +1375,7 @@ export default function App() {
               Info
             </button>
           </div>
-          <div className="mt-4 rounded-2xl bg-white p-5 dark:bg-gh-surface-2">
+          <div className="mt-3">
             <div className="flex flex-wrap items-center gap-4">
               <div
                 className={`text-4xl font-semibold ${outputs.pressureIndicator.regulationRisk === "high"
@@ -1443,7 +1443,7 @@ export default function App() {
           </div>
         </section>
 
-        <section className="rounded-2xl bg-panel p-6 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:p-7 xl:col-span-2">
+        <section className="rounded-2xl bg-panel p-5 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface sm:p-6 xl:col-span-2">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="flex items-center gap-2 font-display text-2xl">
               <Layers3 className="h-6 w-6 text-accent dark:text-gh-accent" />
