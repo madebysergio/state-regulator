@@ -12,6 +12,10 @@ module.exports = {
         sans: ["Space Grotesk", "sans-serif"],
       },
       colors: {
+        surface: "#f7f5f1",
+        "surface-elevated": "#ffffff",
+        "text-primary": "#141415",
+        "text-secondary": "#52545d",
         ink: "#141415",
         muted: "#6c6d74",
         panel: "#f7f5f1",
@@ -30,8 +34,9 @@ module.exports = {
         "gh-accent": "#2f81f7",
       },
       boxShadow: {
-        panel: "0 18px 32px rgba(20, 20, 21, 0.12)",
-        "panel-dark": "0 0 0 1px rgba(48, 54, 61, 0.6), 0 8px 24px rgba(1, 4, 9, 0.6)",
+        panel: "0 2px 10px rgba(20, 20, 21, 0.08)",
+        "panel-dark": "0 0 0 1px rgba(48, 54, 61, 0.55), 0 3px 12px rgba(1, 4, 9, 0.35)",
+        elevation: "0 2px 10px rgba(20, 20, 21, 0.08)",
       },
       backgroundImage: {
         app: "radial-gradient(circle at 20% 20%, #f5efe8 0%, #f4f1ec 45%, #efe9e0 100%)",

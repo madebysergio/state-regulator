@@ -882,10 +882,11 @@ export default function App() {
 
 
   return (
-    <div className="min-h-screen bg-app px-6 pb-16 pt-8 text-ink dark:bg-app-dark dark:text-gh-text md:px-12 md:pt-10 lg:px-16 lg:pt-12">
+    <div className="min-h-screen bg-app text-text-primary dark:bg-app-dark dark:text-gh-text">
+      <div className="app-shell">
       <header className="flex items-center justify-end">
         <button
-          className={`inline-flex items-center gap-2 rounded-full border border-panel-strong bg-white px-4 py-2 text-sm font-semibold text-ink shadow-sm transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:bg-gh-surface dark:text-gh-text`}
+          className={`inline-flex min-h-[44px] items-center gap-2 rounded-[14px] border border-panel-strong bg-surface-elevated px-4 py-2 text-sm font-semibold text-text-primary shadow-elevation transition-all duration-300 ${EASE_CURVE} active:bg-panel disabled:bg-panel disabled:text-text-secondary dark:border-gh-border dark:bg-gh-surface dark:text-gh-text dark:active:bg-gh-surface-2`}
           onClick={() => {
             const next = theme === "dark" ? "light" : "dark";
             setTheme(next);
@@ -897,24 +898,24 @@ export default function App() {
         </button>
       </header>
 
-      <section className="mt-4 flex items-center justify-between rounded-2xl bg-panel px-6 py-4 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface md:px-8">
+      <section className="card-surface mt-4 flex items-center justify-between px-4 py-4 sm:px-6">
         <span className="text-sm uppercase tracking-[0.2em] text-muted dark:text-gh-muted">Now</span>
-        <strong className="font-display text-4xl md:text-5xl">
+        <strong className="font-display text-[clamp(2rem,8vw,2.5rem)]">
           {formatTimeZoned(nowUtcMs, timeZone)}
         </strong>
       </section>
 
       <div className="mt-4 flex flex-col gap-4">
-        <section className="rounded-2xl bg-panel p-5 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface sm:p-6 flex flex-col">
+        <section className="card-surface flex flex-col">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="flex items-center gap-2 font-display text-2xl">
+            <h2 className="section-title">
               <ClipboardList className="h-6 w-6 text-accent dark:text-gh-accent" />
               Today's log
             </h2>
             <div className="flex items-center gap-2">
               <div className="relative">
                 <select
-                  className="appearance-none rounded-full border border-panel-strong bg-white px-3 py-2 pr-10 text-sm dark:border-gh-border dark:bg-gh-surface"
+                  className="control-pill appearance-none pr-10"
                   value={eventLogSort}
                   onChange={(eventTarget) =>
                     setEventLogSort(eventTarget.target.value as "latest" | "oldest")
@@ -935,7 +936,7 @@ export default function App() {
               <div className="mt-3 relative">
                 <div
                   ref={activityListRef}
-                  className="h-[190px] snap-y snap-mandatory overflow-y-auto pr-2 space-y-3"
+                  className="space-y-3"
                 >
                   {orderedEvents.map((event) => {
                     const highlightRoutine =
@@ -948,9 +949,9 @@ export default function App() {
                       <button
                         key={event.type}
                         data-event-type={event.type}
-                        className={`w-full min-h-[76px] snap-start rounded-2xl border px-5 py-4 text-left text-base transition-all duration-300 ${EASE_CURVE} ${selectedEvent === event.type
+                        className={`w-full min-h-[76px] snap-start rounded-[14px] border px-5 py-4 text-left text-base transition-all duration-300 ${EASE_CURVE} ${selectedEvent === event.type
                             ? "border-accent bg-accent-soft dark:bg-gh-surface-2"
-                            : "border-transparent bg-white dark:bg-gh-surface-2"
+                            : "border-panel-strong/70 bg-surface-elevated dark:border-gh-border dark:bg-gh-surface-2"
                           } ${highlightRoutine || isNext ? "ring-2 ring-accent/30 border-accent" : ""}`}
                         onClick={() => setSelectedEvent(event.type)}
                         type="button"
@@ -975,18 +976,17 @@ export default function App() {
                     );
                   })}
                 </div>
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-b from-transparent to-panel dark:to-gh-surface" />
               </div>
               <div className="mt-4 flex w-full flex-col gap-3">
                 <button
-                  className={`w-full rounded-full bg-accent px-6 py-3 text-base font-semibold text-white transition-all duration-300 ${EASE_CURVE}`}
+                  className={`btn-primary ${EASE_CURVE}`}
                   onClick={addEvent}
                   type="button"
                 >
                   Log {EVENT_TYPES.find((event) => event.type === selectedEvent)?.label}
                 </button>
                 <button
-                  className={`w-full rounded-full border border-panel-strong bg-white px-6 py-3 text-base transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:bg-gh-surface`}
+                  className={`btn-secondary ${EASE_CURVE}`}
                   onClick={clearAll}
                   type="button"
                 >
@@ -1009,14 +1009,11 @@ export default function App() {
                         {group.date}
                       </div>
                       {group.events.slice(0, 2).map((event) => (
-                        <div
-                          key={event.id}
-                          className="flex min-h-[64px] flex-col items-start gap-4 rounded-xl bg-white p-4 fade-in dark:bg-gh-surface-2 sm:flex-row sm:items-center sm:justify-between"
-                        >
+                        <div key={event.id} className="panel-row fade-in flex min-h-[64px] flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
                           <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:gap-3">
                             <div className="sm:shrink-0">{EVENT_ICONS[event.type]}</div>
                             <div className="flex w-full flex-col gap-2">
-                              <strong className="text-[24px]">{EVENT_LABELS[event.type]}</strong>
+                              <strong className="text-xl sm:text-2xl">{EVENT_LABELS[event.type]}</strong>
                               {event.autoPredicted ? (
                                 <small className="w-fit rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-[9px] uppercase tracking-[0.16em] text-accent dark:border-gh-accent/50 dark:bg-gh-accent/10 dark:text-gh-accent">
                                   auto-predicted
@@ -1038,7 +1035,7 @@ export default function App() {
                           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                             {editId === event.id ? (
                               <>
-                                <div className="flex w-full items-center gap-2 rounded-full border border-panel-strong bg-white px-4 py-3 shadow-[0_0_0_1px_rgba(0,0,0,0.02)] dark:border-gh-border dark:bg-gh-surface sm:w-auto">
+                                <div className="control-pill flex w-full items-center gap-2 shadow-[0_0_0_1px_rgba(0,0,0,0.02)] sm:w-auto">
                                   <input
                                     type="datetime-local"
                                     className="bg-transparent text-sm outline-none"
@@ -1059,7 +1056,7 @@ export default function App() {
                                   </span>
                                 </div>
                                 <button
-                                  className={`w-full h-11 rounded-full bg-accent px-6 text-base font-semibold text-white transition-all duration-300 ${EASE_CURVE} sm:w-auto`}
+                                  className={`btn-primary h-11 sm:w-auto`}
                                   onClick={commitEdit}
                                   type="button"
                                 >
@@ -1068,7 +1065,7 @@ export default function App() {
                               </>
                             ) : (
                               <button
-                                className={`w-full h-11 whitespace-nowrap rounded-full border border-panel-strong px-6 text-base transition-all duration-300 ${EASE_CURVE} dark:border-gh-border sm:w-auto`}
+                                className={`btn-secondary h-11 whitespace-nowrap sm:w-auto`}
                                 onClick={() => startEdit(event.id)}
                                 type="button"
                               >
@@ -1076,7 +1073,7 @@ export default function App() {
                               </button>
                             )}
                             <button
-                              className={`flex h-11 w-full shrink-0 items-center justify-center rounded-full border border-panel-strong text-muted transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:text-gh-muted sm:w-11`}
+                              className={`flex h-11 w-full shrink-0 items-center justify-center rounded-[14px] border border-panel-strong text-muted transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:text-gh-muted sm:w-11`}
                               onClick={() => deleteEvent(event.id)}
                               type="button"
                               aria-label="Delete log"
@@ -1092,7 +1089,7 @@ export default function App() {
               )}
               {eventCount > 2 ? (
                 <button
-                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-full border border-panel-strong px-4 py-3 text-sm dark:border-gh-border"
+                  className="btn-secondary mt-4 inline-flex items-center justify-center gap-2 text-sm"
                   onClick={() => setEventLogModalOpen(true)}
                   type="button"
                 >
@@ -1104,9 +1101,9 @@ export default function App() {
           </div>
         </section>
 
-        <section className="rounded-2xl bg-panel p-5 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface sm:p-6 xl:col-span-2">
+        <section className="card-surface xl:col-span-2">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="flex items-center gap-2 font-display text-2xl">
+            <h2 className="section-title">
               <Clock className="h-6 w-6 text-accent dark:text-gh-accent" />
               What's coming up
             </h2>
@@ -1130,7 +1127,7 @@ export default function App() {
                 <div className="text-xs uppercase tracking-[0.2em] text-muted dark:text-gh-muted">
                   Now
                 </div>
-                <div className="mt-3 grid grid-cols-1 gap-3 overflow-hidden pr-1 transition-all duration-300 xl:grid-cols-3">
+            <div className="mt-3 grid grid-cols-1 gap-3 transition-all duration-300 xl:grid-cols-3">
                   {visibleUpcoming.map((item) => {
                     const minutes = Math.max(
                       0,
@@ -1150,7 +1147,7 @@ export default function App() {
                     return (
                       <button
                         key={item.id}
-                        className={`w-full rounded-2xl border border-allowed/40 bg-white p-4 text-left transition-all duration-300 ${EASE_CURVE} fade-in dark:border-allowed/30 dark:bg-gh-surface-2 ${selectedUpcomingId === item.id ? "ring-2 ring-accent/30" : ""
+                        className={`w-full rounded-[14px] border border-panel-strong/80 bg-surface-elevated p-4 text-left transition-all duration-300 ${EASE_CURVE} fade-in dark:border-gh-border dark:bg-gh-surface-2 ${selectedUpcomingId === item.id ? "ring-2 ring-accent/30 border-accent" : ""
                           }`}
                         onClick={() =>
                           setSelectedUpcomingId(selectedUpcomingId === item.id ? null : item.id)
@@ -1192,7 +1189,7 @@ export default function App() {
           {nextThreeTimeline.length > rowsPerView ? (
             <div className="mt-auto pt-4 flex w-full flex-col gap-2">
               <button
-                className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-panel-strong px-4 py-3 text-sm dark:border-gh-border"
+                className="btn-secondary inline-flex items-center justify-center gap-2 text-sm"
                 type="button"
                 onClick={() =>
                   setUpcomingRowsToShow((prev) => Math.min(maxUpcomingRows, prev + 1))
@@ -1204,7 +1201,7 @@ export default function App() {
               </button>
               {upcomingRowsToShow > 1 ? (
                 <button
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-panel-strong px-4 py-3 text-sm dark:border-gh-border"
+                  className="btn-secondary inline-flex items-center justify-center gap-2 text-sm"
                   type="button"
                   onClick={() => setUpcomingRowsToShow(1)}
                 >
@@ -1220,8 +1217,8 @@ export default function App() {
           ) : null}
         </section>
 
-        <section className="rounded-2xl bg-panel p-5 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface sm:p-6">
-          <h2 className="flex items-center gap-2 font-display text-2xl">
+        <section className="card-surface">
+          <h2 className="section-title">
             <Activity className="h-6 w-6 text-accent dark:text-gh-accent" />
             Right now
           </h2>
@@ -1229,7 +1226,7 @@ export default function App() {
             {rightNowSummary.map((item, index) => (
               <li
                 key={`${item}-${index}`}
-                className="rounded-xl bg-white p-5 text-base font-medium dark:bg-gh-surface-2"
+                className="panel-row text-base font-medium"
               >
                 <div className="flex items-center gap-3">
                   {getStateIcon(item)}
@@ -1240,13 +1237,13 @@ export default function App() {
           </ul>
         </section>
 
-        <section className="rounded-2xl bg-panel p-5 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface sm:p-6">
-          <h2 className="flex items-center gap-2 font-display text-2xl">
+        <section className="card-surface">
+          <h2 className="section-title">
             <Sparkle className="h-6 w-6 text-accent dark:text-gh-accent" />
             Routine activity
           </h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-xl bg-white p-5 text-base font-medium dark:bg-gh-surface-2">
+            <div className="panel-row text-base font-medium">
               <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
                 Longest routine
               </div>
@@ -1254,7 +1251,7 @@ export default function App() {
                 {longestRoutine !== null ? formatCountdown(longestRoutine) : "—"}
               </div>
             </div>
-            <div className="rounded-xl bg-white p-5 text-base font-medium dark:bg-gh-surface-2">
+            <div className="panel-row text-base font-medium">
               <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
                 Shortest routine
               </div>
@@ -1268,13 +1265,13 @@ export default function App() {
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
-        <section className="rounded-2xl bg-panel p-5 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface sm:p-6 xl:col-span-2">
-          <h2 className="flex items-center gap-2 font-display text-2xl">
+        <section className="card-surface xl:col-span-2">
+          <h2 className="section-title">
             <AlarmClock className="h-6 w-6 text-accent dark:text-gh-accent" />
             Next steps
           </h2>
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <div className="rounded-2xl bg-white p-5 dark:bg-gh-surface-2">
+            <div className="panel-row">
               <div className="text-xs uppercase tracking-[0.08em] text-muted dark:text-gh-muted">
                 Next chance
               </div>
@@ -1348,7 +1345,7 @@ export default function App() {
                 </div>
               ) : null}
             </div>
-            <div className="rounded-2xl bg-white p-5 text-sm text-muted dark:bg-gh-surface-2 dark:text-gh-muted">
+            <div className="panel-row text-sm text-muted dark:text-gh-muted">
               —
             </div>
           </div>
@@ -1360,9 +1357,9 @@ export default function App() {
           </div>
         </section>
 
-        <section className="rounded-2xl bg-panel p-5 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface sm:p-6 xl:col-span-2">
+        <section className="card-surface xl:col-span-2">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="flex items-center gap-2 font-display text-2xl">
+            <h2 className="section-title">
               <Gauge className="h-6 w-6 text-accent dark:text-gh-accent" />
               Time until wake
             </h2>
@@ -1443,14 +1440,14 @@ export default function App() {
           </div>
         </section>
 
-        <section className="rounded-2xl bg-panel p-5 shadow-panel dark:shadow-panel-dark dark:bg-gh-surface sm:p-6 xl:col-span-2">
+        <section className="card-surface xl:col-span-2">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="flex items-center gap-2 font-display text-2xl">
+            <h2 className="section-title">
               <Layers3 className="h-6 w-6 text-accent dark:text-gh-accent" />
               Today's pattern
             </h2>
             <button
-              className="inline-flex items-center gap-2 rounded-full border border-panel-strong px-4 py-2 text-sm dark:border-gh-border"
+              className="control-pill inline-flex items-center gap-2"
               onClick={() => setShiftExpanded(!shiftExpanded)}
               type="button"
             >
@@ -1458,7 +1455,7 @@ export default function App() {
               {shiftExpanded ? "Collapse" : "Expand"}
             </button>
           </div>
-          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-panel-strong bg-accent-soft px-4 py-3 text-sm dark:border-gh-border dark:bg-gh-surface-2">
+            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-[14px] border border-panel-strong bg-accent-soft px-4 py-3 text-sm dark:border-gh-border dark:bg-gh-surface-2">
             <Sparkle className="h-4 w-4 text-accent dark:text-gh-accent" />
             <span className="text-ink dark:text-gh-text">
               Updated {shiftUpdatedAt} based on {eventCount} logged events
@@ -1467,7 +1464,7 @@ export default function App() {
           {shiftExpanded ? (
             <ul className="mt-4 flex flex-col gap-3 fade-in">
               {historyDelta ? (
-                <li className="flex items-center gap-3 rounded-xl border border-accent/40 bg-accent-soft px-4 py-3 text-sm font-semibold text-ink dark:border-gh-accent/50 dark:bg-gh-surface-2 dark:text-gh-text">
+                <li className="flex items-center gap-3 rounded-[14px] border border-accent/40 bg-accent-soft px-4 py-3 text-sm font-semibold text-ink dark:border-gh-accent/50 dark:bg-gh-surface-2 dark:text-gh-text">
                   <span className="text-xs text-accent">●</span>
                   <span>{historyDelta}</span>
                 </li>
@@ -1475,9 +1472,9 @@ export default function App() {
               {outputs.shiftPreview.map((item) => (
                 <li
                   key={item.delta}
-                  className={`flex items-center gap-3 rounded-xl border border-panel-strong px-4 py-3 text-sm dark:border-gh-border ${item.status === "applied"
-                      ? "bg-white text-ink dark:bg-gh-surface-2 dark:text-gh-text font-semibold"
-                      : "bg-white/70 text-muted dark:bg-gh-surface-2 dark:text-gh-muted"
+                  className={`flex items-center gap-3 rounded-[14px] border border-panel-strong px-4 py-3 text-sm dark:border-gh-border ${item.status === "applied"
+                      ? "bg-surface-elevated text-ink dark:bg-gh-surface-2 dark:text-gh-text font-semibold"
+                      : "bg-surface-elevated/70 text-muted dark:bg-gh-surface-2 dark:text-gh-muted"
                     }`}
                 >
                   <span
@@ -1500,16 +1497,16 @@ export default function App() {
       </div>
 
 
-      <footer className="mt-6 text-sm text-muted dark:text-gh-muted">
+      <footer className="mt-6 text-sm text-secondary dark:text-gh-muted">
         <p>State-driven regulator</p>
       </footer>
 
       {toasts.length > 0 ? (
-        <div className="fixed bottom-6 right-6 z-50 flex w-[280px] flex-col gap-2">
+        <div className="fixed bottom-6 left-4 right-4 z-50 flex max-w-sm flex-col gap-2 sm:left-auto sm:right-6">
           {toasts.map((toast) => (
             <div
               key={toast.id}
-              className={`rounded-2xl border border-panel-strong bg-white px-4 py-3 text-sm font-semibold text-ink shadow-panel transition-all duration-300 ${EASE_CURVE} toast-anim dark:border-gh-border dark:bg-gh-surface dark:text-gh-text dark:shadow-panel-dark`}
+              className={`rounded-[14px] border border-panel-strong bg-surface-elevated px-4 py-3 text-sm font-semibold text-ink shadow-elevation transition-all duration-300 ${EASE_CURVE} toast-anim dark:border-gh-border dark:bg-gh-surface dark:text-gh-text dark:shadow-panel-dark`}
             >
               {toast.message}
             </div>
@@ -1518,14 +1515,14 @@ export default function App() {
       ) : null}
 
       {eventLogModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-6">
+        <div className="fixed inset-0 z-50 overflow-y-auto px-4 py-6 sm:px-6">
           <button
             className="absolute inset-0 bg-black/40"
             type="button"
             aria-label="Close event log"
             onClick={() => setEventLogModalOpen(false)}
           />
-          <div className="relative w-full max-w-3xl rounded-2xl border border-panel-strong bg-white p-6 shadow-panel dark:border-gh-border dark:bg-gh-surface dark:shadow-panel-dark">
+          <div className="relative mx-auto w-full max-w-3xl rounded-[14px] border border-panel-strong bg-surface-elevated p-6 shadow-elevation dark:border-gh-border dark:bg-gh-surface dark:shadow-panel-dark">
             <div className="flex items-center justify-between gap-3">
               <h3 className="text-xl font-semibold text-ink dark:text-gh-text">Full log</h3>
               <div className="flex items-center gap-2">
@@ -1534,7 +1531,7 @@ export default function App() {
                 </span>
                 <div className="relative">
                   <select
-                    className="appearance-none rounded-full border border-panel-strong bg-white px-3 py-2 pr-10 text-sm dark:border-gh-border dark:bg-gh-surface"
+                    className="control-pill appearance-none pr-10"
                     value={eventLogSort}
                     onChange={(eventTarget) =>
                       setEventLogSort(eventTarget.target.value as "latest" | "oldest")
@@ -1547,7 +1544,7 @@ export default function App() {
                 </div>
               </div>
               <button
-                className="flex h-10 w-10 items-center justify-center rounded-full border border-panel-strong text-muted dark:border-gh-border dark:text-gh-muted"
+                className="flex h-11 w-11 items-center justify-center rounded-[14px] border border-panel-strong text-muted dark:border-gh-border dark:text-gh-muted"
                 type="button"
                 aria-label="Close"
                 onClick={() => setEventLogModalOpen(false)}
@@ -1555,7 +1552,7 @@ export default function App() {
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="mt-4 max-h-[70vh] overflow-y-auto pr-2">
+            <div className="mt-4 pr-2">
               <div className="flex flex-col gap-4">
                 {groupedEventLog.map((group) => (
                   <div key={group.date} className="flex flex-col gap-3">
@@ -1565,13 +1562,13 @@ export default function App() {
                     {group.events.map((event) => (
                       <div
                         key={event.id}
-                        className="flex min-h-[64px] flex-wrap items-center justify-between gap-4 rounded-xl bg-white p-4 dark:bg-gh-surface-2"
+                        className="panel-row flex min-h-[64px] flex-wrap items-center justify-between gap-4"
                       >
                         <div className="flex items-center gap-3">
                           {EVENT_ICONS[event.type]}
                           <div className="flex flex-col gap-1">
                             <div className="flex items-center justify-between gap-2">
-                              <strong className="text-[24px]">{EVENT_LABELS[event.type]}</strong>
+                              <strong className="text-xl sm:text-2xl">{EVENT_LABELS[event.type]}</strong>
                               {event.autoPredicted ? (
                                 <small className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-[9px] uppercase tracking-[0.16em] text-accent dark:border-gh-accent/50 dark:bg-gh-accent/10 dark:text-gh-accent">
                                   auto-predicted
@@ -1593,14 +1590,14 @@ export default function App() {
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
                           <button
-                            className={`rounded-full border border-panel-strong px-6 py-3 text-base transition-all duration-300 ${EASE_CURVE} dark:border-gh-border`}
+                            className={`btn-secondary w-auto ${EASE_CURVE}`}
                             onClick={() => startEdit(event.id)}
                             type="button"
                           >
                             Edit time
                           </button>
                           <button
-                            className={`flex h-11 w-11 items-center justify-center rounded-full border border-panel-strong text-muted transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:text-gh-muted`}
+                            className={`flex h-11 w-11 items-center justify-center rounded-[14px] border border-panel-strong text-muted transition-all duration-300 ${EASE_CURVE} dark:border-gh-border dark:text-gh-muted`}
                             onClick={() => deleteEvent(event.id)}
                             type="button"
                             aria-label="Delete log"
@@ -1620,20 +1617,20 @@ export default function App() {
 
 
       {wakeInfoOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-6">
+        <div className="fixed inset-0 z-50 overflow-y-auto px-4 py-6 sm:px-6">
           <button
             className="absolute inset-0 bg-black/40"
             type="button"
             aria-label="Close time until tired info"
             onClick={() => setWakeInfoOpen(false)}
           />
-          <div className="relative w-full max-w-xl rounded-2xl border border-panel-strong bg-white p-6 shadow-panel dark:border-gh-border dark:bg-gh-surface dark:shadow-panel-dark">
+          <div className="relative mx-auto w-full max-w-xl rounded-[14px] border border-panel-strong bg-surface-elevated p-6 shadow-elevation dark:border-gh-border dark:bg-gh-surface dark:shadow-panel-dark">
             <div className="flex items-center justify-between gap-3">
               <h3 className="text-xl font-semibold text-ink dark:text-gh-text">
                 Time until wake
               </h3>
               <button
-                className="flex h-10 w-10 items-center justify-center rounded-full border border-panel-strong text-muted dark:border-gh-border dark:text-gh-muted"
+                className="flex h-11 w-11 items-center justify-center rounded-[14px] border border-panel-strong text-muted dark:border-gh-border dark:text-gh-muted"
                 type="button"
                 aria-label="Close"
                 onClick={() => setWakeInfoOpen(false)}
@@ -1650,6 +1647,7 @@ export default function App() {
         </div>
       ) : null}
 
+      </div>
     </div>
   );
 }

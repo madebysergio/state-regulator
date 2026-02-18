@@ -5,8 +5,88 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --surface: #f7f5f1;
+    --surface-elevated: #ffffff;
+    --text-primary: #141415;
+    --text-secondary: #52545d;
+    --accent: #155d6b;
+    color-scheme: light;
+  }
+
+  .dark {
+    --surface: #161b22;
+    --surface-elevated: #0f141a;
+    --text-primary: #c9d1d9;
+    --text-secondary: #9aa4af;
+    --accent: #2f81f7;
+    color-scheme: dark;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
   body {
-    @apply font-sans text-ink bg-app dark:text-gh-text dark:bg-gh-bg;
+    @apply font-sans text-base leading-6 text-text-primary bg-app dark:text-gh-text dark:bg-gh-bg;
+  }
+
+  button,
+  select,
+  input[type="button"],
+  input[type="submit"] {
+    min-height: 44px;
+  }
+
+  button,
+  select,
+  input {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+}
+
+@layer components {
+  .app-shell {
+    width: 100%;
+    max-width: 32rem;
+    margin-inline: auto;
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-top: calc(16px + env(safe-area-inset-top));
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  }
+
+  @media (min-width: 420px) {
+    .app-shell {
+      padding-left: max(20px, env(safe-area-inset-left));
+      padding-right: max(20px, env(safe-area-inset-right));
+    }
+  }
+
+  .card-surface {
+    @apply rounded-[14px] border border-panel-strong/70 bg-surface p-4 shadow-elevation dark:border-gh-border dark:bg-gh-surface sm:p-5;
+  }
+
+  .section-title {
+    @apply flex items-center gap-2 font-display text-xl sm:text-2xl;
+  }
+
+  .panel-row {
+    @apply rounded-[14px] border border-panel-strong/80 bg-surface-elevated p-4 dark:border-gh-border dark:bg-gh-surface-2;
+  }
+
+  .control-pill {
+    @apply min-h-[44px] rounded-[14px] border border-panel-strong bg-surface-elevated px-4 py-2 text-sm text-text-primary transition-colors active:bg-panel disabled:bg-panel disabled:text-text-secondary dark:border-gh-border dark:bg-gh-surface dark:text-gh-text dark:active:bg-gh-surface-2;
+  }
+
+  .btn-primary {
+    @apply min-h-[44px] w-full rounded-[14px] bg-accent px-5 py-3 text-base font-semibold text-white transition-all duration-200 active:opacity-90 disabled:opacity-60;
+  }
+
+  .btn-secondary {
+    @apply min-h-[44px] w-full rounded-[14px] border border-panel-strong bg-surface-elevated px-5 py-3 text-base text-text-primary transition-all duration-200 active:bg-panel disabled:bg-panel disabled:text-text-secondary dark:border-gh-border dark:bg-gh-surface dark:text-gh-text dark:active:bg-gh-surface-2;
   }
 }
 
